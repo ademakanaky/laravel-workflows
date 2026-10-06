@@ -5,6 +5,7 @@ namespace Ademakanaky\LaravelWorkflows;
 use Ademakanaky\LaravelWorkflows\Contracts\AssignmentStrategy;
 use Ademakanaky\LaravelWorkflows\Contracts\DefinitionPublisher;
 use Ademakanaky\LaravelWorkflows\Contracts\TransitionAuthorizer;
+use Ademakanaky\LaravelWorkflows\Contracts\WorkflowParticipantResolver;
 use Ademakanaky\LaravelWorkflows\Contracts\WorkflowTaskNotifier;
 use Ademakanaky\LaravelWorkflows\Definitions\WorkflowBlueprint;
 use Ademakanaky\LaravelWorkflows\Enums\WorkflowInstanceStatus;
@@ -15,8 +16,11 @@ use Ademakanaky\LaravelWorkflows\Events\WorkflowStarted;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowStarting;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskAssigned;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskCancelled;
+use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskClaimed;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskCompleted;
+use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskNudged;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskOpened;
+use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskReleased;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowTransitioned;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowTransitioning;
 use Ademakanaky\LaravelWorkflows\Exceptions\IdempotencyConflictException;
@@ -47,6 +51,7 @@ class WorkflowManager
         private readonly WorkflowExtensionRegistry $extensions,
         private readonly WorkflowInbox $workflowInbox,
         private readonly WorkflowTaskNotifier $taskNotifier,
+        private readonly WorkflowParticipantResolver $participants,
     ) {}
 
     public function define(WorkflowBlueprint $blueprint): WorkflowVersion
@@ -84,6 +89,9 @@ class WorkflowManager
             if (! $workflow) {
                 throw new WorkflowException("Workflow definition [{$definition}] is not synchronized.");
             }
+            if (! $workflow->is_active) {
+                throw new WorkflowException("Workflow definition [{$definition}] is inactive.");
+            }
 
             if ($idempotencyKey !== null) {
                 $existing = $instanceClass::query()
@@ -111,7 +119,9 @@ class WorkflowManager
                 }
             }
 
-            $version = $workflow->latestVersion()->with('states')->first();
+            $version = $workflow->active_version_id
+                ? $workflow->activeVersion()->with('states')->first()
+                : $workflow->latestVersion()->with('states')->first();
             if (! $version) {
                 throw new WorkflowException("Workflow definition [{$definition}] has no published version.");
             }
@@ -339,8 +349,11 @@ class WorkflowManager
 
             if ($assignee) {
                 $task->assignee()->associate($assignee);
+                $task->assigned_at = now();
             } else {
                 $task->assignee()->dissociate();
+                $task->assigned_at = null;
+                $task->claimed_at = null;
             }
             $task->save();
 
@@ -372,6 +385,158 @@ class WorkflowManager
             DB::afterCommit(function () use ($assignedTask, $previousAssignee, $actor): void {
                 event(new WorkflowTaskAssigned($assignedTask, $previousAssignee, $actor));
                 $this->taskNotifier->assigned($assignedTask, $previousAssignee, $actor);
+            });
+
+            return $result;
+        });
+    }
+
+    /** @param array<string, mixed> $data */
+    public function claim(
+        WorkflowTask|int|string $task,
+        Model $actor,
+        array $data = [],
+        ?string $idempotencyKey = null,
+    ): WorkflowInstance {
+        $this->assertIdempotencyKey($idempotencyKey);
+        $this->assertPersisted($actor, 'actor');
+        $id = $task instanceof WorkflowTask ? $task->getKey() : $task;
+        $requestHash = RequestFingerprint::make([
+            'operation' => 'claim',
+            'task' => $id,
+            'actor' => RequestFingerprint::model($actor),
+            'data' => $data,
+        ]);
+
+        return DB::transaction(function () use ($id, $actor, $data, $idempotencyKey, $requestHash): WorkflowInstance {
+            $taskClass = WorkflowModelRegistry::task();
+            $currentTask = $taskClass::query()->whereKey($id)->lockForUpdate()->firstOrFail();
+            $instanceClass = WorkflowModelRegistry::instance();
+            $instance = $instanceClass::query()->whereKey($currentTask->workflow_instance_id)->lockForUpdate()->firstOrFail();
+
+            if ($idempotencyKey !== null && $existing = $instance->logs()->where('idempotency_key', $idempotencyKey)->first()) {
+                $this->assertIdempotentRequestMatches($existing->request_hash, $requestHash, $idempotencyKey);
+
+                return $this->reloadInstance($instance);
+            }
+            if ($currentTask->status !== WorkflowTaskStatus::Open || ! $instance->isRunning()) {
+                throw new WorkflowException('Only an open task on a running workflow may be claimed.');
+            }
+            if ($currentTask->assignee_id !== null) {
+                throw new WorkflowException('The workflow task is already assigned.');
+            }
+            if (! $this->actorIsCandidate($currentTask, $actor)) {
+                throw new WorkflowException('The actor is not a candidate for this workflow task.');
+            }
+
+            $currentTask->assignee()->associate($actor);
+            $currentTask->assigned_at = now();
+            $currentTask->claimed_at = now();
+            $currentTask->save();
+            $this->record($instance, $instance->current_state_id, $instance->currentState, 'claim', $actor, $data, $idempotencyKey, $requestHash);
+
+            $claimedTask = $currentTask->refresh()->load($this->taskRelations());
+            $result = $this->reloadInstance($instance);
+            DB::afterCommit(fn () => event(new WorkflowTaskClaimed($claimedTask, $actor)));
+
+            return $result;
+        });
+    }
+
+    /** @param array<string, mixed> $data */
+    public function release(
+        WorkflowTask|int|string $task,
+        Model $actor,
+        array $data = [],
+        ?string $idempotencyKey = null,
+    ): WorkflowInstance {
+        $this->assertIdempotencyKey($idempotencyKey);
+        $this->assertPersisted($actor, 'actor');
+        $id = $task instanceof WorkflowTask ? $task->getKey() : $task;
+        $requestHash = RequestFingerprint::make([
+            'operation' => 'release',
+            'task' => $id,
+            'actor' => RequestFingerprint::model($actor),
+            'data' => $data,
+        ]);
+
+        return DB::transaction(function () use ($id, $actor, $data, $idempotencyKey, $requestHash): WorkflowInstance {
+            $taskClass = WorkflowModelRegistry::task();
+            $currentTask = $taskClass::query()->whereKey($id)->lockForUpdate()->firstOrFail();
+            $instanceClass = WorkflowModelRegistry::instance();
+            $instance = $instanceClass::query()->whereKey($currentTask->workflow_instance_id)->lockForUpdate()->firstOrFail();
+
+            if ($idempotencyKey !== null && $existing = $instance->logs()->where('idempotency_key', $idempotencyKey)->first()) {
+                $this->assertIdempotentRequestMatches($existing->request_hash, $requestHash, $idempotencyKey);
+
+                return $this->reloadInstance($instance);
+            }
+            if ($currentTask->status !== WorkflowTaskStatus::Open || $currentTask->assignee_id === null) {
+                throw new WorkflowException('Only an assigned open task may be released.');
+            }
+            if (! $currentTask->assignee || ! $this->participants->matches($actor, $currentTask->assignee)) {
+                throw new WorkflowException('Only the current assignee may release this workflow task.');
+            }
+
+            $currentTask->assignee()->dissociate();
+            $currentTask->assigned_at = null;
+            $currentTask->claimed_at = null;
+            $currentTask->save();
+            $this->record($instance, $instance->current_state_id, $instance->currentState, 'release', $actor, $data, $idempotencyKey, $requestHash);
+
+            $releasedTask = $currentTask->refresh()->load($this->taskRelations());
+            $result = $this->reloadInstance($instance);
+            DB::afterCommit(fn () => event(new WorkflowTaskReleased($releasedTask, $actor)));
+
+            return $result;
+        });
+    }
+
+    /** @param array<string, mixed> $data */
+    public function nudge(
+        WorkflowTask|int|string $task,
+        ?Model $actor = null,
+        array $data = [],
+        ?string $idempotencyKey = null,
+    ): WorkflowInstance {
+        $this->assertIdempotencyKey($idempotencyKey);
+        if ($actor) {
+            $this->assertPersisted($actor, 'actor');
+        }
+        $id = $task instanceof WorkflowTask ? $task->getKey() : $task;
+        $requestHash = RequestFingerprint::make([
+            'operation' => 'nudge',
+            'task' => $id,
+            'actor' => RequestFingerprint::model($actor),
+            'data' => $data,
+        ]);
+
+        return DB::transaction(function () use ($id, $actor, $data, $idempotencyKey, $requestHash): WorkflowInstance {
+            $taskClass = WorkflowModelRegistry::task();
+            $currentTask = $taskClass::query()->whereKey($id)->lockForUpdate()->firstOrFail();
+            $instanceClass = WorkflowModelRegistry::instance();
+            $instance = $instanceClass::query()->whereKey($currentTask->workflow_instance_id)->lockForUpdate()->firstOrFail();
+
+            if ($idempotencyKey !== null && $existing = $instance->logs()->where('idempotency_key', $idempotencyKey)->first()) {
+                $this->assertIdempotentRequestMatches($existing->request_hash, $requestHash, $idempotencyKey);
+
+                return $this->reloadInstance($instance);
+            }
+            if ($currentTask->status !== WorkflowTaskStatus::Open || ! $instance->isRunning()) {
+                throw new WorkflowException('Only an open task on a running workflow may be nudged.');
+            }
+
+            $currentTask->update([
+                'last_nudged_at' => now(),
+                'nudge_count' => $currentTask->nudge_count + 1,
+            ]);
+            $this->record($instance, $instance->current_state_id, $instance->currentState, 'nudge', $actor, $data, $idempotencyKey, $requestHash);
+
+            $nudgedTask = $currentTask->refresh()->load($this->taskRelations());
+            $result = $this->reloadInstance($instance);
+            DB::afterCommit(function () use ($nudgedTask, $actor, $data): void {
+                event(new WorkflowTaskNudged($nudgedTask, $actor, $data));
+                $this->taskNotifier->nudged($nudgedTask, $actor, $data);
             });
 
             return $result;
@@ -453,6 +618,7 @@ class WorkflowManager
 
     private function createTask(WorkflowInstance $instance, WorkflowState $state, ?Model $actor): WorkflowTask
     {
+        $state->loadMissing('candidates.candidate');
         $assignmentStrategy = $this->assignments;
         if ($state->assignment_strategy !== null) {
             $assignmentStrategy = app($this->extensions->resolveAssignmentStrategy($state->assignment_strategy));
@@ -460,6 +626,11 @@ class WorkflowManager
         $assignee = $assignmentStrategy->assign($instance, $state, $actor);
         if ($assignee) {
             $this->assertPersisted($assignee, 'assignee');
+        } elseif ($state->candidates->count() === 1) {
+            $soleCandidate = $state->candidates->first();
+            if ($soleCandidate?->candidate instanceof Model) {
+                $assignee = $soleCandidate->candidate;
+            }
         }
         $taskClass = WorkflowModelRegistry::task();
         $task = new $taskClass([
@@ -470,10 +641,40 @@ class WorkflowManager
         ]);
         if ($assignee) {
             $task->assignee()->associate($assignee);
+            $task->assigned_at = now();
         }
         $task->save();
 
+        foreach ($state->candidates as $candidate) {
+            $task->candidates()->create([
+                'candidate_type' => $candidate->candidate_type,
+                'candidate_id' => $candidate->candidate_id,
+            ]);
+        }
+
         return $task->load($this->taskRelations());
+    }
+
+    private function actorIsCandidate(WorkflowTask $task, Model $actor): bool
+    {
+        $candidates = $task->candidates()->with('candidate')->get();
+        if ($candidates->isEmpty()) {
+            return true;
+        }
+
+        return $candidates->contains(function ($candidate) use ($actor): bool {
+            if ($candidate->candidate instanceof Model) {
+                return $this->participants->matches($actor, $candidate->candidate);
+            }
+            foreach ($this->participants->principals($actor) as $principal) {
+                if ($principal->getMorphClass() === $candidate->candidate_type
+                    && (string) $principal->getKey() === (string) $candidate->candidate_id) {
+                    return true;
+                }
+            }
+
+            return false;
+        });
     }
 
     /** @param array<string, mixed> $data */
@@ -545,7 +746,7 @@ class WorkflowManager
     /** @return list<string> */
     private function taskRelations(): array
     {
-        return ['assignee', 'state', 'instance.definition', 'instance.currentState', 'instance.subject'];
+        return ['assignee', 'candidates.candidate', 'state', 'instance.definition', 'instance.currentState', 'instance.subject'];
     }
 
     private function reloadInstance(WorkflowInstance $instance): WorkflowInstance

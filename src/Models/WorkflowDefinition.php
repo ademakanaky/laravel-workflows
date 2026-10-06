@@ -6,6 +6,7 @@ use Ademakanaky\LaravelWorkflows\Enums\WorkflowDefinitionSource;
 use Ademakanaky\LaravelWorkflows\Exceptions\ImmutableWorkflowRecordException;
 use Ademakanaky\LaravelWorkflows\Support\WorkflowModelRegistry;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -15,6 +16,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property string $name
  * @property string|null $description
  * @property WorkflowDefinitionSource $managed_by
+ * @property bool $is_active
+ * @property int|null $active_version_id
  */
 class WorkflowDefinition extends Model
 {
@@ -39,7 +42,7 @@ class WorkflowDefinition extends Model
         });
     }
 
-    protected $casts = ['managed_by' => WorkflowDefinitionSource::class];
+    protected $casts = ['managed_by' => WorkflowDefinitionSource::class, 'is_active' => 'boolean'];
 
     /** @return HasMany<WorkflowVersion, $this> */
     public function versions(): HasMany
@@ -51,6 +54,12 @@ class WorkflowDefinition extends Model
     public function latestVersion(): HasOne
     {
         return $this->hasOne(WorkflowModelRegistry::version(), 'workflow_definition_id')->ofMany('version', 'max');
+    }
+
+    /** @return BelongsTo<WorkflowVersion, $this> */
+    public function activeVersion(): BelongsTo
+    {
+        return $this->belongsTo(WorkflowModelRegistry::version(), 'active_version_id');
     }
 
     /** @return HasMany<WorkflowInstance, $this> */

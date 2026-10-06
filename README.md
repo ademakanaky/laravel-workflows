@@ -29,6 +29,13 @@ If the application must own and modify its migration, publish it and set `load_m
 php artisan vendor:publish --tag=workflows-migrations
 ```
 
+Applications upgrading from a release where the original migration was already published with `load_migrations` disabled can publish only the additive administration migration:
+
+```bash
+php artisan vendor:publish --tag=workflows-administration-migration
+php artisan migrate
+```
+
 ## Define a workflow
 
 Add definitions to `config/workflows.php`:
@@ -319,7 +326,11 @@ class ApplicationWorkflowNotifier implements WorkflowTaskNotifier
 {
     public function opened(WorkflowTask $task, ?Model $actor): void
     {
-        $task->assignee?->notify(new WorkflowApprovalRequested($task));
+        $recipients = $task->assignee
+            ? collect([$task->assignee])
+            : $task->candidates->pluck('candidate')->filter();
+
+        $recipients->each->notify(new WorkflowApprovalRequested($task));
     }
 
     public function assigned(WorkflowTask $task, ?Model $previousAssignee, ?Model $actor): void
@@ -330,6 +341,11 @@ class ApplicationWorkflowNotifier implements WorkflowTaskNotifier
     public function completed(WorkflowTask $task, ?Model $actor): void {}
 
     public function cancelled(WorkflowTask $task, ?Model $actor): void {}
+
+    public function nudged(WorkflowTask $task, ?Model $actor, array $data): void
+    {
+        $this->opened($task, $actor);
+    }
 }
 ```
 
@@ -341,7 +357,120 @@ Register it in `config/workflows.php`:
 
 The notifier can send Laravel database, mail, broadcast, Slack, or other notifications. Queue the application's notification when delivery should happen asynchronously. Applications may instead listen directly for `WorkflowTaskOpened`, `WorkflowTaskAssigned`, `WorkflowTaskCompleted`, and `WorkflowTaskCancelled`.
 
-Only assigned tasks appear in a personal inbox. Configure an `AssignmentStrategy` or explicitly call `Workflow::assign()` when a state requires an individual actor to take action.
+Assigned tasks and unassigned tasks for which the actor is a candidate appear in the personal inbox. Configure candidates, an `AssignmentStrategy`, or explicitly call `Workflow::assign()` when a state requires an actor to take action.
+
+## Administration API
+
+`WorkflowAdministration` is the supported boundary for an administration interface. Controllers should use this service or the `WorkflowAdmin` facade instead of updating package tables directly. The host application remains responsible for authorizing administrative routes and actions.
+
+```php
+use Ademakanaky\LaravelWorkflows\WorkflowAdministration;
+
+$admin = app(WorkflowAdministration::class);
+
+$definitions = $admin->definitions()->paginate();
+$versions = $admin->versions('purchase-approval')->paginate();
+$definition = $admin->definition('purchase-approval');
+```
+
+### Configure step participants
+
+Candidates are versioned with the workflow definition. One candidate is assigned automatically. Multiple candidates receive the unassigned task in their inbox and an eligible candidate may claim it.
+
+```php
+$blueprint
+    ->candidates('manager-review', [$managerA, $managerB])
+    ->candidate('finance-review', $financeManager)
+    ->assignmentStrategy('director-review', 'least-busy-director');
+
+$version = $admin->publish($blueprint);
+```
+
+For an existing database-managed definition, this convenience method exports the active version, changes the candidates, and publishes a new immutable version:
+
+```php
+$version = $admin->configureStepCandidates(
+    slug: 'purchase-approval',
+    state: 'manager-review',
+    candidates: [$managerA, $managerB],
+);
+```
+
+Code-managed definitions remain read-only to database administration tools. Change their configuration in code and run `workflow:sync`.
+
+Candidates are polymorphic Eloquent models. A candidate may therefore be a user, team, role, or another application-owned principal. To make team and role tasks appear in each member's inbox, implement `WorkflowParticipantResolver` and configure it as `participant_resolver`. Its `principals()` method returns the user together with their teams or roles, while `matches()` determines whether an actor represents a configured principal.
+
+### Inspect and search processes
+
+```php
+$process = $admin->process($instanceId);
+
+$process->currentState;
+$process->subject;
+$process->currentTask;
+$process->currentAssignee;
+$process->candidateActors;
+$process->availableTransitions;
+$process->history;
+$process->timeInCurrentStateSeconds;
+```
+
+Administration queries support normal Eloquent pagination and task/process scopes:
+
+```php
+$processes = $admin->processes()
+    ->running()
+    ->forWorkflow('purchase-approval')
+    ->inState('manager-review')
+    ->assignedTo($manager)
+    ->paginate();
+
+$tasks = $admin->tasks()
+    ->open()
+    ->forWorkflow('purchase-approval')
+    ->inState('manager-review')
+    ->paginate();
+
+$overdue = $admin->tasks()->overdue()->paginate();
+$unassigned = $admin->tasks()->open()->unassigned()->paginate();
+```
+
+### Claim, release, reassign, and nudge
+
+All responsibility changes and reminders are recorded in the immutable workflow history.
+
+```php
+$admin->claim($task, $candidate, idempotencyKey: 'claim-123');
+$admin->release($task, $candidate, idempotencyKey: 'release-123');
+$admin->reassign($task, $newAssignee, $administrator, ['reason' => 'Covering leave']);
+$admin->unassign($task, $administrator);
+$admin->nudge($task, $administrator, ['message' => 'Approval is overdue'], 'nudge-123');
+```
+
+Nudging updates `last_nudged_at` and `nudge_count`, creates a `nudge` history record, dispatches `WorkflowTaskNudged` after commit, and invokes `WorkflowTaskNotifier::nudged()`.
+
+### Activate and deactivate definitions
+
+Publishing a new definition version activates it for new process instances. Existing processes remain pinned to their original version. An administrator may explicitly activate an older version or prevent new starts:
+
+```php
+$admin->activate($version, $administrator);
+$admin->deactivate('purchase-approval', $administrator);
+```
+
+Deactivation does not interrupt already running instances.
+
+### Dashboard summaries
+
+```php
+$dashboard = $admin->dashboard();
+
+$dashboard->counts;              // definitions, processes, open/overdue/unassigned tasks
+$dashboard->byWorkflow;          // open task counts
+$dashboard->byState;             // open task counts
+$dashboard->byAssignee;          // desk workload
+$dashboard->averageStateSeconds; // completed-task turnaround time
+```
 
 ## History and events
 
@@ -365,6 +494,11 @@ The package dispatches:
 - `WorkflowTaskAssigned` after an assignment commits
 - `WorkflowTaskCompleted` after its transition commits
 - `WorkflowTaskCancelled` after cancellation commits
+- `WorkflowTaskClaimed` after a candidate claims a task
+- `WorkflowTaskReleased` after an assignee releases a task
+- `WorkflowTaskNudged` after an audited reminder commits
+- `WorkflowDefinitionActivated` after a version is activated
+- `WorkflowDefinitionDeactivated` after a definition is deactivated
 - `WorkflowCancelled` after cancellation commits
 - `WorkflowDefinitionPublishing` before a definition version is persisted
 - `WorkflowDefinitionPublished` after a definition version commits

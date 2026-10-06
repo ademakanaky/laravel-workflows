@@ -4,6 +4,7 @@ namespace Ademakanaky\LaravelWorkflows\Models;
 
 use Ademakanaky\LaravelWorkflows\Concerns\ImmutableWorkflowRecord;
 use Ademakanaky\LaravelWorkflows\Support\WorkflowModelRegistry;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -18,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property bool $is_final
  * @property string|null $assignment_strategy
  * @property array<string, mixed>|null $metadata
+ * @property-read Collection<int, WorkflowStateCandidate> $candidates
  */
 class WorkflowState extends Model
 {
@@ -45,5 +47,11 @@ class WorkflowState extends Model
     public function incomingTransitions(): HasMany
     {
         return $this->hasMany(WorkflowModelRegistry::transition(), 'to_state_id');
+    }
+
+    /** @return HasMany<WorkflowStateCandidate, $this> */
+    public function candidates(): HasMany
+    {
+        return $this->hasMany(WorkflowModelRegistry::stateCandidate(), 'workflow_state_id');
     }
 }

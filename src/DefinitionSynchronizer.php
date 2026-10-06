@@ -69,6 +69,12 @@ class DefinitionSynchronizer implements DefinitionPublisher
                     'assignment_strategy' => $state['assignment_strategy'],
                     'metadata' => $state['metadata'],
                 ]);
+                foreach ($state['candidates'] as $candidate) {
+                    $states[$state['key']]->candidates()->create([
+                        'candidate_type' => $candidate['type'],
+                        'candidate_id' => $candidate['id'],
+                    ]);
+                }
             }
 
             foreach ($payload['transitions'] as $transition) {
@@ -82,7 +88,8 @@ class DefinitionSynchronizer implements DefinitionPublisher
                 ]);
             }
 
-            $result = $version->load('definition', 'states', 'transitions');
+            $definition->update(['active_version_id' => $version->getKey(), 'is_active' => true]);
+            $result = $version->load('definition', 'states.candidates', 'transitions');
             DB::afterCommit(fn () => event(new WorkflowDefinitionPublished($result, $source)));
 
             return $result;

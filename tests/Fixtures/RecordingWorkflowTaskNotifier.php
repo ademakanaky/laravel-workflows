@@ -20,6 +20,9 @@ class RecordingWorkflowTaskNotifier implements WorkflowTaskNotifier
     /** @var list<WorkflowTask> */
     public array $cancelled = [];
 
+    /** @var list<WorkflowTask> */
+    public array $nudged = [];
+
     public function opened(WorkflowTask $task, ?Model $actor): void
     {
         $this->opened[] = $task;
@@ -38,5 +41,10 @@ class RecordingWorkflowTaskNotifier implements WorkflowTaskNotifier
     public function cancelled(WorkflowTask $task, ?Model $actor): void
     {
         $this->cancelled[] = $task;
+    }
+
+    public function nudged(WorkflowTask $task, ?Model $actor, array $data): void
+    {
+        $this->nudged[] = $task;
     }
 }

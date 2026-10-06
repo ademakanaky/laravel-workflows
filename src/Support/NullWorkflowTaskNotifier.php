@@ -15,4 +15,6 @@ class NullWorkflowTaskNotifier implements WorkflowTaskNotifier
     public function completed(WorkflowTask $task, ?Model $actor): void {}
 
     public function cancelled(WorkflowTask $task, ?Model $actor): void {}
+
+    public function nudged(WorkflowTask $task, ?Model $actor, array $data): void {}
 }

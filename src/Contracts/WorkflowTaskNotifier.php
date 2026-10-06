@@ -14,4 +14,7 @@ interface WorkflowTaskNotifier
     public function completed(WorkflowTask $task, ?Model $actor): void;
 
     public function cancelled(WorkflowTask $task, ?Model $actor): void;
+
+    /** @param array<string, mixed> $data */
+    public function nudged(WorkflowTask $task, ?Model $actor, array $data): void;
 }

@@ -7,8 +7,10 @@ use Ademakanaky\LaravelWorkflows\Exceptions\WorkflowException;
 use Ademakanaky\LaravelWorkflows\Support\WorkflowModelRegistry;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 /**
@@ -19,6 +21,16 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * @property string|null $assignee_id
  * @property WorkflowTaskStatus $status
  * @property array<string, mixed>|null $metadata
+ * @property int $nudge_count
+ * @property CarbonInterface|null $due_at
+ * @property CarbonInterface|null $assigned_at
+ * @property CarbonInterface|null $claimed_at
+ * @property CarbonInterface|null $last_nudged_at
+ * @property CarbonInterface|null $completed_at
+ * @property CarbonInterface $created_at
+ * @property-read WorkflowInstance $instance
+ * @property-read WorkflowState $state
+ * @property-read Collection<int, WorkflowTaskCandidate> $candidates
  * @property-read Model|null $assignee
  */
 class WorkflowTask extends Model
@@ -31,6 +43,9 @@ class WorkflowTask extends Model
         'status' => WorkflowTaskStatus::class,
         'metadata' => 'array',
         'due_at' => 'immutable_datetime',
+        'assigned_at' => 'immutable_datetime',
+        'claimed_at' => 'immutable_datetime',
+        'last_nudged_at' => 'immutable_datetime',
         'completed_at' => 'immutable_datetime',
     ];
 
@@ -70,6 +85,33 @@ class WorkflowTask extends Model
             ->where('due_at', '<', $at ?? now());
     }
 
+    /**
+     * @param  Builder<WorkflowTask>  $query
+     * @return Builder<WorkflowTask>
+     */
+    public function scopeUnassigned(Builder $query): Builder
+    {
+        return $query->whereNull('assignee_id');
+    }
+
+    /**
+     * @param  Builder<WorkflowTask>  $query
+     * @return Builder<WorkflowTask>
+     */
+    public function scopeForWorkflow(Builder $query, string $slug): Builder
+    {
+        return $query->whereHas('instance.definition', fn (Builder $definition): Builder => $definition->where('slug', $slug));
+    }
+
+    /**
+     * @param  Builder<WorkflowTask>  $query
+     * @return Builder<WorkflowTask>
+     */
+    public function scopeInState(Builder $query, string $state): Builder
+    {
+        return $query->whereHas('state', fn (Builder $workflowState): Builder => $workflowState->where('key', $state));
+    }
+
     /** @return BelongsTo<WorkflowInstance, $this> */
     public function instance(): BelongsTo
     {
@@ -86,5 +128,11 @@ class WorkflowTask extends Model
     public function assignee(): MorphTo
     {
         return $this->morphTo();
+    }
+
+    /** @return HasMany<WorkflowTaskCandidate, $this> */
+    public function candidates(): HasMany
+    {
+        return $this->hasMany(WorkflowModelRegistry::taskCandidate(), 'workflow_task_id');
     }
 }

@@ -6,7 +6,9 @@ use Ademakanaky\LaravelWorkflows\Exceptions\WorkflowException;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowDefinition;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowInstance;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowState;
+use Ademakanaky\LaravelWorkflows\Models\WorkflowStateCandidate;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowTask;
+use Ademakanaky\LaravelWorkflows\Models\WorkflowTaskCandidate;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowTransition;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowTransitionLog;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowVersion;
@@ -32,6 +34,12 @@ final class WorkflowModelRegistry
         return self::resolve('state', WorkflowState::class);
     }
 
+    /** @return class-string<WorkflowStateCandidate> */
+    public static function stateCandidate(): string
+    {
+        return self::resolve('state_candidate', WorkflowStateCandidate::class);
+    }
+
     /** @return class-string<WorkflowTransition> */
     public static function transition(): string
     {
@@ -48,6 +56,12 @@ final class WorkflowModelRegistry
     public static function task(): string
     {
         return self::resolve('task', WorkflowTask::class);
+    }
+
+    /** @return class-string<WorkflowTaskCandidate> */
+    public static function taskCandidate(): string
+    {
+        return self::resolve('task_candidate', WorkflowTaskCandidate::class);
     }
 
     /** @return class-string<WorkflowTransitionLog> */

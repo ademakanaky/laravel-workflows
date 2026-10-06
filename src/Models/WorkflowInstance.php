@@ -3,8 +3,11 @@
 namespace Ademakanaky\LaravelWorkflows\Models;
 
 use Ademakanaky\LaravelWorkflows\Enums\WorkflowInstanceStatus;
+use Ademakanaky\LaravelWorkflows\Enums\WorkflowTaskStatus;
 use Ademakanaky\LaravelWorkflows\Support\WorkflowModelRegistry;
 use Ademakanaky\LaravelWorkflows\WorkflowManager;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -26,6 +29,7 @@ use Illuminate\Support\Collection;
  * @property string|null $idempotency_key
  * @property string|null $request_hash
  * @property int $lock_version
+ * @property CarbonImmutable $created_at
  * @property-read WorkflowDefinition $definition
  * @property-read WorkflowVersion $version
  * @property-read WorkflowState $currentState
@@ -52,6 +56,61 @@ class WorkflowInstance extends Model
         'completed_at' => 'immutable_datetime',
         'cancelled_at' => 'immutable_datetime',
     ];
+
+    /** @param Builder<WorkflowInstance> $query
+     * @return Builder<WorkflowInstance> */
+    public function scopeRunning(Builder $query): Builder
+    {
+        return $query->where('status', WorkflowInstanceStatus::Running->value);
+    }
+
+    /** @param Builder<WorkflowInstance> $query
+     * @return Builder<WorkflowInstance> */
+    public function scopeCompleted(Builder $query): Builder
+    {
+        return $query->where('status', WorkflowInstanceStatus::Completed->value);
+    }
+
+    /** @param Builder<WorkflowInstance> $query
+     * @return Builder<WorkflowInstance> */
+    public function scopeCancelled(Builder $query): Builder
+    {
+        return $query->where('status', WorkflowInstanceStatus::Cancelled->value);
+    }
+
+    /** @param Builder<WorkflowInstance> $query
+     * @return Builder<WorkflowInstance> */
+    public function scopeForWorkflow(Builder $query, string $slug): Builder
+    {
+        return $query->whereHas('definition', fn (Builder $definition): Builder => $definition->where('slug', $slug));
+    }
+
+    /** @param Builder<WorkflowInstance> $query
+     * @return Builder<WorkflowInstance> */
+    public function scopeInState(Builder $query, string $state): Builder
+    {
+        return $query->whereHas('currentState', fn (Builder $current): Builder => $current->where('key', $state));
+    }
+
+    /** @param Builder<WorkflowInstance> $query
+     * @return Builder<WorkflowInstance> */
+    public function scopeAssignedTo(Builder $query, Model $actor): Builder
+    {
+        return $query->whereHas('tasks', fn (Builder $tasks): Builder => $tasks
+            ->where('status', WorkflowTaskStatus::Open->value)
+            ->where('assignee_type', $actor->getMorphClass())
+            ->where('assignee_id', $actor->getKey()));
+    }
+
+    /** @param Builder<WorkflowInstance> $query
+     * @return Builder<WorkflowInstance> */
+    public function scopeOverdue(Builder $query): Builder
+    {
+        return $query->whereHas('tasks', fn (Builder $tasks): Builder => $tasks
+            ->where('status', WorkflowTaskStatus::Open->value)
+            ->whereNotNull('due_at')
+            ->where('due_at', '<', now()));
+    }
 
     /** @return BelongsTo<WorkflowDefinition, $this> */
     public function definition(): BelongsTo

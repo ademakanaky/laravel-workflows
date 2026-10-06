@@ -11,6 +11,12 @@ All notable changes to this project will be documented here. The project follows
 - Post-commit task opened, completed, and cancelled lifecycle events.
 - An opt-in workflow-task notification hook with a no-op default implementation.
 - A pending-tasks relationship for workflow participants.
+- A complete administration service and `WorkflowAdmin` facade for definitions, versions, process inspection, operations, and dashboards.
+- Versioned state candidates and runtime task candidates, including single-candidate assignment and multi-candidate inboxes.
+- A participant resolver contract for application-owned users, roles, teams, and other principals.
+- Audited claim, release, reassignment, and nudge operations with post-commit lifecycle events.
+- Explicit definition-version activation and definition deactivation for controlling new process starts.
+- Administrative workflow/task query scopes, process snapshots, grouped workload counts, and turnaround summaries.
 
 ## [1.0.0] - 2026-10-06
 

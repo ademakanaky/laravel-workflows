@@ -219,13 +219,18 @@ class PublicApiContractTest extends TestCase
     {
         $config = ServiceProvider::pathsToPublish(WorkflowServiceProvider::class, 'workflows-config');
         $migrations = ServiceProvider::pathsToPublish(WorkflowServiceProvider::class, 'workflows-migrations');
+        $administrationMigrations = ServiceProvider::pathsToPublish(WorkflowServiceProvider::class, 'workflows-administration-migration');
         $configSource = realpath(__DIR__.'/../../config/workflows.php');
         $migrationSource = realpath(__DIR__.'/../../database/migrations/2026_01_01_000000_create_workflow_tables.php');
+        $administrationMigrationSource = realpath(__DIR__.'/../../database/migrations/2026_01_02_000000_add_workflow_administration_support.php');
 
         $this->assertContains(config_path('workflows.php'), $config);
         $this->assertContains($configSource, array_map('realpath', array_keys($config)));
         $this->assertContains($migrationSource, array_map('realpath', array_keys($migrations)));
-        $this->assertStringEndsWith('_create_workflow_tables.php', (string) reset($migrations));
+        $this->assertContains($administrationMigrationSource, array_map('realpath', array_keys($migrations)));
+        $this->assertCount(2, $migrations);
+        $this->assertContains($administrationMigrationSource, array_map('realpath', array_keys($administrationMigrations)));
+        $this->assertCount(1, $administrationMigrations);
     }
 
     public function test_commands_cover_selection_validation_and_empty_configuration(): void

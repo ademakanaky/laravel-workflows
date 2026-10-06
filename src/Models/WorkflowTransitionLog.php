@@ -4,6 +4,7 @@ namespace Ademakanaky\LaravelWorkflows\Models;
 
 use Ademakanaky\LaravelWorkflows\Concerns\ImmutableWorkflowRecord;
 use Ademakanaky\LaravelWorkflows\Support\WorkflowModelRegistry;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -20,6 +21,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * @property array<string, mixed>|null $data
  * @property string|null $idempotency_key
  * @property string|null $request_hash
+ * @property CarbonInterface $created_at
  */
 class WorkflowTransitionLog extends Model
 {

@@ -8,6 +8,7 @@ use Ademakanaky\LaravelWorkflows\Contracts\AssignmentStrategy;
 use Ademakanaky\LaravelWorkflows\Contracts\DefinitionPublisher;
 use Ademakanaky\LaravelWorkflows\Contracts\DefinitionValidator;
 use Ademakanaky\LaravelWorkflows\Contracts\TransitionAuthorizer;
+use Ademakanaky\LaravelWorkflows\Contracts\WorkflowParticipantResolver;
 use Ademakanaky\LaravelWorkflows\Contracts\WorkflowTaskNotifier;
 use Ademakanaky\LaravelWorkflows\Support\WorkflowExtensionRegistry;
 use Illuminate\Support\ServiceProvider;
@@ -21,6 +22,7 @@ class WorkflowServiceProvider extends ServiceProvider
         $this->app->singleton(AssignmentStrategy::class, fn ($app) => $app->make(config('workflows.assignment_strategy')));
         $this->app->singleton(TransitionAuthorizer::class, fn ($app) => $app->make(config('workflows.transition_authorizer')));
         $this->app->singleton(WorkflowTaskNotifier::class, fn ($app) => $app->make(config('workflows.task_notifier')));
+        $this->app->singleton(WorkflowParticipantResolver::class, fn ($app) => $app->make(config('workflows.participant_resolver')));
         $this->app->singleton(DefinitionSynchronizer::class);
         $this->app->alias(DefinitionSynchronizer::class, DefinitionPublisher::class);
         $this->app->singleton(WorkflowDefinitionValidator::class);
@@ -32,11 +34,15 @@ class WorkflowServiceProvider extends ServiceProvider
         ));
         $this->app->singleton(WorkflowManager::class);
         $this->app->singleton(WorkflowInbox::class);
+        $this->app->singleton(WorkflowProcessInspector::class);
+        $this->app->singleton(WorkflowDashboard::class);
+        $this->app->singleton(WorkflowAdministration::class);
     }
 
     public function boot(): void
     {
         $migration = __DIR__.'/../database/migrations/2026_01_01_000000_create_workflow_tables.php';
+        $administrationMigration = __DIR__.'/../database/migrations/2026_01_02_000000_add_workflow_administration_support.php';
 
         if (config('workflows.load_migrations', true)) {
             $this->loadMigrationsFrom(dirname($migration));
@@ -46,7 +52,11 @@ class WorkflowServiceProvider extends ServiceProvider
         ], 'workflows-config');
         $this->publishes([
             $migration => database_path('migrations/'.date('Y_m_d_His').'_create_workflow_tables.php'),
+            $administrationMigration => database_path('migrations/'.date('Y_m_d_His', time() + 1).'_add_workflow_administration_support.php'),
         ], 'workflows-migrations');
+        $this->publishes([
+            $administrationMigration => database_path('migrations/'.date('Y_m_d_His', time() + 1).'_add_workflow_administration_support.php'),
+        ], 'workflows-administration-migration');
 
         if ($this->app->runningInConsole()) {
             $this->commands([SyncWorkflowsCommand::class, ValidateWorkflowsCommand::class]);

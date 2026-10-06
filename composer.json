@@ -41,7 +41,8 @@
                 "Ademakanaky\\LaravelWorkflows\\WorkflowServiceProvider"
             ],
             "aliases": {
-                "Workflow": "Ademakanaky\\LaravelWorkflows\\Facades\\Workflow"
+                "Workflow": "Ademakanaky\\LaravelWorkflows\\Facades\\Workflow",
+                "WorkflowAdmin": "Ademakanaky\\LaravelWorkflows\\Facades\\WorkflowAdmin"
             }
         }
     },

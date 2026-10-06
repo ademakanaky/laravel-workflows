@@ -10,7 +10,11 @@ This document defines the compatibility surface intended for Laravel Workflows 1
 - `WorkflowDefinitionExporter`
 - `WorkflowExtensionRegistry`
 - `WorkflowInbox`
+- `WorkflowAdministration`
+- `WorkflowProcessInspector`
+- `WorkflowDashboard`
 - The `Workflow` facade
+- The `WorkflowAdmin` facade
 
 The method names, required arguments, return types, and documented behavior of these services follow Semantic Versioning after 1.0. New optional arguments and new methods may be added in minor releases.
 
@@ -40,6 +44,7 @@ New optional keys may be introduced in minor releases. Existing keys will not ch
 - `DefinitionPublisher`
 - `DefinitionValidator`
 - `WorkflowTaskNotifier`
+- `WorkflowParticipantResolver`
 
 Contracts will not receive new required methods during 1.x.
 
@@ -49,6 +54,8 @@ Applications may extend the configured package models. Public relationships, cas
 
 `WorkflowTask` query scopes `open()`, `assignedTo()`, and `overdue()` are public. The facade methods `inbox()` and `pendingCount()` and the corresponding `WorkflowInbox` service provide the supported pending-work query boundary for application and administration interfaces.
 
+The administration API includes definition/version listing, database-managed publication, candidate configuration through new immutable versions, version activation and definition deactivation, process inspection, process/task query scopes, claim/release/reassignment, audited nudges, and dashboard summaries. Administration clients must use these services instead of mutating published records.
+
 Published definition records and transition logs are immutable. Database-authored tools must publish through `DefinitionPublisher` rather than modifying these models.
 
 ## Events
@@ -56,6 +63,8 @@ Published definition records and transition logs are immutable. Database-authore
 All event class names and constructor properties are public. Events documented as post-commit will continue to be emitted only after a successful outer transaction commits.
 
 Task lifecycle events include `WorkflowTaskOpened`, `WorkflowTaskAssigned`, `WorkflowTaskCompleted`, and `WorkflowTaskCancelled`. The configured `WorkflowTaskNotifier` is invoked at the same post-commit boundary.
+
+`WorkflowTaskClaimed`, `WorkflowTaskReleased`, `WorkflowTaskNudged`, `WorkflowDefinitionActivated`, and `WorkflowDefinitionDeactivated` are also public post-commit events.
 
 ## Database compatibility
 

@@ -3,10 +3,12 @@
 namespace Ademakanaky\LaravelWorkflows\Definitions;
 
 use Ademakanaky\LaravelWorkflows\Exceptions\DefinitionValidationException;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 
 /**
- * @phpstan-type StateDefinition array{key: string, name: string, initial: bool, final: bool, description: string|null, metadata: array<string, mixed>, assignment_strategy: string|null}
+ * @phpstan-type CandidateDefinition array{type: string, id: string}
+ * @phpstan-type StateDefinition array{key: string, name: string, initial: bool, final: bool, description: string|null, metadata: array<string, mixed>, assignment_strategy: string|null, candidates: list<CandidateDefinition>}
  * @phpstan-type TransitionDefinition array{action: string, from: string, to: string, name: string, guards: list<string>, metadata: array<string, mixed>}
  */
 final class WorkflowBlueprint
@@ -97,6 +99,11 @@ final class WorkflowBlueprint
 
                 continue;
             }
+            if (isset($state['candidates']) && ! is_array($state['candidates'])) {
+                $errors[] = "State [{$stateKey}] candidates must be an array.";
+
+                continue;
+            }
             if (isset($state['assignment_strategy']) && (! is_string($state['assignment_strategy']) || $state['assignment_strategy'] === '')) {
                 $errors[] = "State [{$stateKey}] assignment strategy must be a non-empty string or null.";
 
@@ -120,6 +127,7 @@ final class WorkflowBlueprint
                 final: (bool) ($state['final'] ?? false),
                 description: $state['description'] ?? null,
                 assignmentStrategy: $state['assignment_strategy'] ?? null,
+                candidates: $state['candidates'] ?? [],
                 metadata: $state['metadata'] ?? [],
             );
         }
@@ -193,7 +201,10 @@ final class WorkflowBlueprint
         return $this;
     }
 
-    /** @param array<string, mixed> $metadata */
+    /**
+     * @param  array<string, mixed>  $metadata
+     * @param  array<array-key, mixed>  $candidates
+     */
     public function state(
         string $key,
         ?string $name = null,
@@ -202,6 +213,7 @@ final class WorkflowBlueprint
         ?string $description = null,
         array $metadata = [],
         ?string $assignmentStrategy = null,
+        array $candidates = [],
     ): self {
         $this->states[$key] = [
             'key' => $key,
@@ -211,7 +223,47 @@ final class WorkflowBlueprint
             'description' => $description,
             'metadata' => $metadata,
             'assignment_strategy' => $assignmentStrategy,
+            'candidates' => $this->normalizeCandidates($candidates),
         ];
+
+        return $this;
+    }
+
+    public function candidate(string $state, Model $candidate): self
+    {
+        if (! isset($this->states[$state])) {
+            throw new DefinitionValidationException(["Cannot add a candidate to unknown state [{$state}]."]);
+        }
+        if (! $candidate->exists || $candidate->getKey() === null) {
+            throw new DefinitionValidationException(["A candidate for state [{$state}] must be a persisted Eloquent model."]);
+        }
+
+        $this->states[$state]['candidates'][] = [
+            'type' => $candidate->getMorphClass(),
+            'id' => (string) $candidate->getKey(),
+        ];
+        $this->states[$state]['candidates'] = $this->normalizeCandidates($this->states[$state]['candidates']);
+
+        return $this;
+    }
+
+    /** @param array<array-key, mixed> $candidates */
+    public function candidates(string $state, array $candidates): self
+    {
+        if (! isset($this->states[$state])) {
+            throw new DefinitionValidationException(["Cannot configure candidates for unknown state [{$state}]."]);
+        }
+        $this->states[$state]['candidates'] = $this->normalizeCandidates($candidates);
+
+        return $this;
+    }
+
+    public function assignmentStrategy(string $state, ?string $strategy): self
+    {
+        if (! isset($this->states[$state])) {
+            throw new DefinitionValidationException(["Cannot configure assignment for unknown state [{$state}]."]);
+        }
+        $this->states[$state]['assignment_strategy'] = $strategy;
 
         return $this;
     }
@@ -425,5 +477,37 @@ final class WorkflowBlueprint
     {
         return strlen($value) <= 255
             && preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $value) === 1;
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $candidates
+     * @return list<CandidateDefinition>
+     */
+    private function normalizeCandidates(array $candidates): array
+    {
+        $normalized = [];
+        foreach ($candidates as $candidate) {
+            if ($candidate instanceof Model) {
+                if (! $candidate->exists || $candidate->getKey() === null) {
+                    throw new DefinitionValidationException(['Workflow state candidates must be persisted Eloquent models.']);
+                }
+                $candidate = ['type' => $candidate->getMorphClass(), 'id' => (string) $candidate->getKey()];
+            }
+            if (! is_array($candidate)
+                || ! isset($candidate['type'], $candidate['id'])
+                || ! is_string($candidate['type'])
+                || trim($candidate['type']) === ''
+                || (! is_string($candidate['id']) && ! is_int($candidate['id']))) {
+                throw new DefinitionValidationException(['Workflow state candidates require non-empty type and id values.']);
+            }
+            $type = trim($candidate['type']);
+            $id = (string) $candidate['id'];
+            if ($id === '' || strlen($type) > 191 || strlen($id) > 191) {
+                throw new DefinitionValidationException(['Workflow state candidate type and id values must contain between 1 and 191 characters.']);
+            }
+            $normalized[$type.'::'.$id] = ['type' => $type, 'id' => $id];
+        }
+
+        return array_values($normalized);
     }
 }

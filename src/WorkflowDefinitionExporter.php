@@ -10,7 +10,7 @@ class WorkflowDefinitionExporter
     /** @return array<string, mixed> */
     public function export(WorkflowVersion $version): array
     {
-        $version->loadMissing('definition', 'states', 'transitions.fromState', 'transitions.toState');
+        $version->loadMissing('definition', 'states.candidates', 'transitions.fromState', 'transitions.toState');
 
         $states = [];
         foreach ($version->states as $state) {
@@ -20,6 +20,10 @@ class WorkflowDefinitionExporter
                 'initial' => $state->is_initial,
                 'final' => $state->is_final,
                 'assignment_strategy' => $state->assignment_strategy,
+                'candidates' => $state->candidates->map(fn ($candidate): array => [
+                    'type' => $candidate->candidate_type,
+                    'id' => $candidate->candidate_id,
+                ])->all(),
                 'metadata' => $state->metadata ?? [],
             ];
         }
