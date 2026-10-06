@@ -44,6 +44,8 @@ jobs:
       - run: composer test
       - if: ${{ !matrix.legacy }}
         run: composer analyse
+      - if: matrix.testbench == '11.0'
+        run: composer audit --locked
       - run: vendor/bin/pint --test
 
   databases:
@@ -94,3 +96,31 @@ jobs:
           DB_DATABASE: workflows
           DB_USERNAME: ${{ matrix.database == 'mysql' && 'root' || 'postgres' }}
           DB_PASSWORD: password
+
+  clean-application:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:latest
+          coverage: none
+      - run: composer create-project laravel/laravel:^13.0 "$RUNNER_TEMP/laravel-workflows-smoke" --prefer-dist --no-interaction --no-audit
+      - run: composer config repositories.laravel-workflows path "$GITHUB_WORKSPACE"
+        working-directory: ${{ runner.temp }}/laravel-workflows-smoke
+      - run: composer require ademakanaky/laravel-workflows:@dev --prefer-dist --no-interaction --no-audit
+        working-directory: ${{ runner.temp }}/laravel-workflows-smoke
+      - run: php artisan migrate --force
+        working-directory: ${{ runner.temp }}/laravel-workflows-smoke
+      - run: php artisan workflow:validate
+        working-directory: ${{ runner.temp }}/laravel-workflows-smoke
+      - run: php artisan workflow:sync
+        working-directory: ${{ runner.temp }}/laravel-workflows-smoke
+      - run: php artisan vendor:publish --tag=workflows-config --force
+        working-directory: ${{ runner.temp }}/laravel-workflows-smoke
+      - run: php artisan vendor:publish --tag=workflows-migrations --force
+        working-directory: ${{ runner.temp }}/laravel-workflows-smoke
+      - run: php "$GITHUB_WORKSPACE/tests/Smoke/CleanApplication.php"
+        working-directory: ${{ runner.temp }}/laravel-workflows-smoke

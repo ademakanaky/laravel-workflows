@@ -20,6 +20,8 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  */
 class WorkflowTask extends Model
 {
+    protected $table = 'workflow_tasks';
+
     protected $guarded = [];
 
     protected $casts = [

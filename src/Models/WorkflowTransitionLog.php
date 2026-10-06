@@ -27,6 +27,8 @@ class WorkflowTransitionLog extends Model
 
     public const UPDATED_AT = null;
 
+    protected $table = 'workflow_transition_logs';
+
     protected $guarded = [];
 
     public $incrementing = false;

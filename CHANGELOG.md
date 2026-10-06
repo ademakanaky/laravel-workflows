@@ -23,3 +23,5 @@ All notable changes to this project will be documented here. The project follows
 - Larastan configuration and SQLite/MySQL/PostgreSQL CI coverage.
 - Laravel 9 and 10 compatibility, including dedicated Testbench CI coverage.
 - Isolated test schemas for persistent MySQL and PostgreSQL CI databases.
+- Public API contract, transaction-event, custom-model, command, publishing, and clean-application smoke coverage.
+- Explicit model tables and relationship keys so every configured package model can be safely extended.

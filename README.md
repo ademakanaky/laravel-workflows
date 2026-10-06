@@ -329,7 +329,7 @@ composer analyse
 composer format
 ```
 
-The suite uses Orchestra Testbench. CI exercises supported Laravel/PHP combinations with SQLite and also runs the feature suite against MySQL and PostgreSQL.
+The suite uses Orchestra Testbench. CI exercises supported Laravel/PHP combinations with SQLite, runs the feature suite against MySQL and PostgreSQL, audits current dependencies, and installs the package into a clean Laravel application for an end-to-end smoke test.
 
 The supported public API and release guarantees are documented in [docs/STABLE_API.md](docs/STABLE_API.md).
 

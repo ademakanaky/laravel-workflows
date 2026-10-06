@@ -23,6 +23,8 @@ class WorkflowTransition extends Model
 {
     use ImmutableWorkflowRecord;
 
+    protected $table = 'workflow_transitions';
+
     protected $guarded = [];
 
     protected $casts = ['guards' => 'array', 'metadata' => 'array'];

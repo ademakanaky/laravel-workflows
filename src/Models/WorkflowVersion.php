@@ -26,6 +26,8 @@ class WorkflowVersion extends Model
 {
     use ImmutableWorkflowRecord;
 
+    protected $table = 'workflow_versions';
+
     protected $guarded = [];
 
     protected $casts = ['metadata' => 'array', 'published_at' => 'immutable_datetime'];
@@ -39,18 +41,18 @@ class WorkflowVersion extends Model
     /** @return HasMany<WorkflowState, $this> */
     public function states(): HasMany
     {
-        return $this->hasMany(WorkflowModelRegistry::state());
+        return $this->hasMany(WorkflowModelRegistry::state(), 'workflow_version_id');
     }
 
     /** @return HasMany<WorkflowTransition, $this> */
     public function transitions(): HasMany
     {
-        return $this->hasMany(WorkflowModelRegistry::transition());
+        return $this->hasMany(WorkflowModelRegistry::transition(), 'workflow_version_id');
     }
 
     /** @return HasOne<WorkflowState, $this> */
     public function initialState(): HasOne
     {
-        return $this->hasOne(WorkflowModelRegistry::state())->where('is_initial', true);
+        return $this->hasOne(WorkflowModelRegistry::state(), 'workflow_version_id')->where('is_initial', true);
     }
 }

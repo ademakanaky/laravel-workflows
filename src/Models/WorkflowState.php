@@ -23,6 +23,8 @@ class WorkflowState extends Model
 {
     use ImmutableWorkflowRecord;
 
+    protected $table = 'workflow_states';
+
     protected $guarded = [];
 
     protected $casts = ['is_initial' => 'boolean', 'is_final' => 'boolean', 'metadata' => 'array'];

@@ -38,6 +38,8 @@ class WorkflowInstance extends Model
 {
     use HasUuids;
 
+    protected $table = 'workflow_instances';
+
     protected $guarded = [];
 
     public $incrementing = false;
@@ -84,13 +86,13 @@ class WorkflowInstance extends Model
     /** @return HasMany<WorkflowTask, $this> */
     public function tasks(): HasMany
     {
-        return $this->hasMany(WorkflowModelRegistry::task());
+        return $this->hasMany(WorkflowModelRegistry::task(), 'workflow_instance_id');
     }
 
     /** @return HasMany<WorkflowTransitionLog, $this> */
     public function logs(): HasMany
     {
-        return $this->hasMany(WorkflowModelRegistry::log());
+        return $this->hasMany(WorkflowModelRegistry::log(), 'workflow_instance_id');
     }
 
     public function isRunning(): bool

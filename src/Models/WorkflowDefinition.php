@@ -18,6 +18,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  */
 class WorkflowDefinition extends Model
 {
+    protected $table = 'workflow_definitions';
+
     protected $guarded = [];
 
     protected static function booted(): void
@@ -42,18 +44,18 @@ class WorkflowDefinition extends Model
     /** @return HasMany<WorkflowVersion, $this> */
     public function versions(): HasMany
     {
-        return $this->hasMany(WorkflowModelRegistry::version());
+        return $this->hasMany(WorkflowModelRegistry::version(), 'workflow_definition_id');
     }
 
     /** @return HasOne<WorkflowVersion, $this> */
     public function latestVersion(): HasOne
     {
-        return $this->hasOne(WorkflowModelRegistry::version())->ofMany('version', 'max');
+        return $this->hasOne(WorkflowModelRegistry::version(), 'workflow_definition_id')->ofMany('version', 'max');
     }
 
     /** @return HasMany<WorkflowInstance, $this> */
     public function instances(): HasMany
     {
-        return $this->hasMany(WorkflowModelRegistry::instance());
+        return $this->hasMany(WorkflowModelRegistry::instance(), 'workflow_definition_id');
     }
 }
