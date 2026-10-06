@@ -21,7 +21,7 @@ jobs:
             legacy: true
           - php: '8.2'
             testbench: '9.0'
-            composer: 'latest'
+            composer: '2.8'
             legacy: false
           - php: '8.2'
             testbench: '10.0'

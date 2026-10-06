@@ -56,7 +56,7 @@ abstract class TestCase extends Orchestra
     protected function setUp(): void
     {
         parent::setUp();
-        $this->artisan('migrate', ['--database' => 'testing'])->run();
+        $this->artisan('migrate:fresh', ['--database' => 'testing'])->run();
 
         Schema::create('documents', function (Blueprint $table): void {
             $table->id();

@@ -22,3 +22,4 @@ All notable changes to this project will be documented here. The project follows
 - A shared non-writing definition validator for CLI and administration interfaces.
 - Larastan configuration and SQLite/MySQL/PostgreSQL CI coverage.
 - Laravel 9 and 10 compatibility, including dedicated Testbench CI coverage.
+- Isolated test schemas for persistent MySQL and PostgreSQL CI databases.
