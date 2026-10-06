@@ -1,0 +1,12 @@
+providers:
+  - Ademakanaky\LaravelWorkflows\WorkflowServiceProvider
+
+workbench:
+  start: '/'
+  install: false
+  discovers:
+    web: false
+    api: false
+    commands: false
+    components: false
+    views: false

@@ -1,0 +1,96 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.2'
+            testbench: '7.0'
+            composer: '2.8'
+            legacy: true
+          - php: '8.2'
+            testbench: '8.0'
+            composer: '2.8'
+            legacy: true
+          - php: '8.2'
+            testbench: '9.0'
+            composer: 'latest'
+            legacy: false
+          - php: '8.2'
+            testbench: '10.0'
+            composer: 'latest'
+            legacy: false
+          - php: '8.3'
+            testbench: '11.0'
+            composer: 'latest'
+            legacy: false
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:${{ matrix.composer }}
+          coverage: none
+      - run: composer require --dev "orchestra/testbench:^${{ matrix.testbench }}" --no-interaction --no-update
+      - run: composer update --prefer-dist --no-interaction
+      - run: composer test
+      - if: ${{ !matrix.legacy }}
+        run: composer analyse
+      - run: vendor/bin/pint --test
+
+  databases:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [mysql, pgsql]
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: workflows
+          MYSQL_ROOT_PASSWORD: password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -ppassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: workflows
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, pdo_pgsql
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction
+      - run: composer test
+        env:
+          WORKFLOW_TEST_DB: ${{ matrix.database }}
+          DB_HOST: 127.0.0.1
+          DB_DATABASE: workflows
+          DB_USERNAME: ${{ matrix.database == 'mysql' && 'root' || 'postgres' }}
+          DB_PASSWORD: password
