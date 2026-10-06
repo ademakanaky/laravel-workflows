@@ -4,8 +4,6 @@ A versioned, extensible workflow and approval engine for Laravel applications.
 
 Laravel Workflows attaches durable processes to any Eloquent model. It provides explicit states and transitions, immutable definition versions, optional task assignment, transition guards, actor authorization, idempotency, lifecycle events, and an append-only audit history without requiring a particular role or tenancy package.
 
-> This package is under active development and has not yet reached a stable release.
-
 ## Requirements
 
 - PHP 8.2 or newer
