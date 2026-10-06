@@ -4,6 +4,8 @@ All notable changes to this project will be documented here. The project follows
 
 ## Unreleased
 
+## [1.0.0-rc.1] - 2026-10-06
+
 ### Added
 
 - Versioned workflow definitions and graph validation.
