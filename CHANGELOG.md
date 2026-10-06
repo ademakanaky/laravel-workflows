@@ -4,6 +4,14 @@ All notable changes to this project will be documented here. The project follows
 
 ## Unreleased
 
+### Added
+
+- A workflow inbox service and facade helpers for paginated pending tasks and badge counts.
+- `open`, `assignedTo`, and `overdue` workflow-task query scopes.
+- Post-commit task opened, completed, and cancelled lifecycle events.
+- An opt-in workflow-task notification hook with a no-op default implementation.
+- A pending-tasks relationship for workflow participants.
+
 ## [1.0.0] - 2026-10-06
 
 ### Added

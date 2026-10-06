@@ -8,6 +8,7 @@ use Ademakanaky\LaravelWorkflows\Models\WorkflowTransition;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowTransitionLog;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowVersion;
 use Ademakanaky\LaravelWorkflows\Support\NullAssignmentStrategy;
+use Ademakanaky\LaravelWorkflows\Support\NullWorkflowTaskNotifier;
 use Ademakanaky\LaravelWorkflows\Support\TaskTransitionAuthorizer;
 
 return [
@@ -27,6 +28,7 @@ return [
 
     'assignment_strategy' => NullAssignmentStrategy::class,
     'transition_authorizer' => TaskTransitionAuthorizer::class,
+    'task_notifier' => NullWorkflowTaskNotifier::class,
     'guards' => [],
     'assignment_strategies' => [],
     'allow_multiple_active_instances' => false,

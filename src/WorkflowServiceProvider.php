@@ -8,6 +8,7 @@ use Ademakanaky\LaravelWorkflows\Contracts\AssignmentStrategy;
 use Ademakanaky\LaravelWorkflows\Contracts\DefinitionPublisher;
 use Ademakanaky\LaravelWorkflows\Contracts\DefinitionValidator;
 use Ademakanaky\LaravelWorkflows\Contracts\TransitionAuthorizer;
+use Ademakanaky\LaravelWorkflows\Contracts\WorkflowTaskNotifier;
 use Ademakanaky\LaravelWorkflows\Support\WorkflowExtensionRegistry;
 use Illuminate\Support\ServiceProvider;
 
@@ -19,6 +20,7 @@ class WorkflowServiceProvider extends ServiceProvider
 
         $this->app->singleton(AssignmentStrategy::class, fn ($app) => $app->make(config('workflows.assignment_strategy')));
         $this->app->singleton(TransitionAuthorizer::class, fn ($app) => $app->make(config('workflows.transition_authorizer')));
+        $this->app->singleton(WorkflowTaskNotifier::class, fn ($app) => $app->make(config('workflows.task_notifier')));
         $this->app->singleton(DefinitionSynchronizer::class);
         $this->app->alias(DefinitionSynchronizer::class, DefinitionPublisher::class);
         $this->app->singleton(WorkflowDefinitionValidator::class);
@@ -29,6 +31,7 @@ class WorkflowServiceProvider extends ServiceProvider
             config('workflows.assignment_strategies', []),
         ));
         $this->app->singleton(WorkflowManager::class);
+        $this->app->singleton(WorkflowInbox::class);
     }
 
     public function boot(): void

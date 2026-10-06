@@ -5,6 +5,7 @@ namespace Ademakanaky\LaravelWorkflows;
 use Ademakanaky\LaravelWorkflows\Contracts\AssignmentStrategy;
 use Ademakanaky\LaravelWorkflows\Contracts\DefinitionPublisher;
 use Ademakanaky\LaravelWorkflows\Contracts\TransitionAuthorizer;
+use Ademakanaky\LaravelWorkflows\Contracts\WorkflowTaskNotifier;
 use Ademakanaky\LaravelWorkflows\Definitions\WorkflowBlueprint;
 use Ademakanaky\LaravelWorkflows\Enums\WorkflowInstanceStatus;
 use Ademakanaky\LaravelWorkflows\Enums\WorkflowTaskStatus;
@@ -13,6 +14,9 @@ use Ademakanaky\LaravelWorkflows\Events\WorkflowCompleted;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowStarted;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowStarting;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskAssigned;
+use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskCancelled;
+use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskCompleted;
+use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskOpened;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowTransitioned;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowTransitioning;
 use Ademakanaky\LaravelWorkflows\Exceptions\IdempotencyConflictException;
@@ -22,12 +26,14 @@ use Ademakanaky\LaravelWorkflows\Exceptions\TransitionNotAuthorizedException;
 use Ademakanaky\LaravelWorkflows\Exceptions\WorkflowException;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowInstance;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowState;
+use Ademakanaky\LaravelWorkflows\Models\WorkflowTask;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowTransition;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowTransitionLog;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowVersion;
 use Ademakanaky\LaravelWorkflows\Support\RequestFingerprint;
 use Ademakanaky\LaravelWorkflows\Support\WorkflowExtensionRegistry;
 use Ademakanaky\LaravelWorkflows\Support\WorkflowModelRegistry;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -39,6 +45,8 @@ class WorkflowManager
         private readonly AssignmentStrategy $assignments,
         private readonly TransitionAuthorizer $authorizer,
         private readonly WorkflowExtensionRegistry $extensions,
+        private readonly WorkflowInbox $workflowInbox,
+        private readonly WorkflowTaskNotifier $taskNotifier,
     ) {}
 
     public function define(WorkflowBlueprint $blueprint): WorkflowVersion
@@ -131,12 +139,16 @@ class WorkflowManager
             $instance->save();
 
             $this->record($instance, null, $initialState, 'start', $actor, $context, $idempotencyKey, $requestHash);
-            if (! $initialState->is_final) {
-                $this->createTask($instance, $initialState, $actor);
-            }
+            $openedTask = $initialState->is_final ? null : $this->createTask($instance, $initialState, $actor);
 
             $result = $this->reloadInstance($instance);
-            DB::afterCommit(fn () => event(new WorkflowStarted($result)));
+            DB::afterCommit(function () use ($result, $openedTask, $actor): void {
+                event(new WorkflowStarted($result));
+                if ($openedTask) {
+                    event(new WorkflowTaskOpened($openedTask, $actor));
+                    $this->taskNotifier->opened($openedTask, $actor);
+                }
+            });
 
             return $result;
         });
@@ -207,10 +219,14 @@ class WorkflowManager
             event(new WorkflowTransitioning($current, $transition, $actor, $data));
 
             $from = $current->current_state_id;
-            $current->tasks()
+            $completedTasks = $current->tasks()
                 ->where('workflow_state_id', $from)
                 ->where('status', WorkflowTaskStatus::Open->value)
+                ->get();
+            $current->tasks()
+                ->whereKey($completedTasks->modelKeys())
                 ->update(['status' => WorkflowTaskStatus::Completed->value, 'completed_at' => now()]);
+            $completedTasks->each->refresh();
 
             $current->update([
                 'current_state_id' => $transition->to_state_id,
@@ -218,15 +234,22 @@ class WorkflowManager
                 'completed_at' => $transition->toState->is_final ? now() : null,
                 'lock_version' => $current->lock_version + 1,
             ]);
+            $completedTasks->load($this->taskRelations());
 
             $log = $this->record($current, $from, $transition->toState, $action, $actor, $data, $idempotencyKey, $requestHash);
-            if (! $transition->toState->is_final) {
-                $this->createTask($current, $transition->toState, $actor);
-            }
+            $openedTask = $transition->toState->is_final ? null : $this->createTask($current, $transition->toState, $actor);
 
             $result = $this->reloadInstance($current);
-            DB::afterCommit(function () use ($result, $log): void {
+            DB::afterCommit(function () use ($result, $log, $completedTasks, $openedTask, $actor): void {
                 event(new WorkflowTransitioned($result, $log));
+                foreach ($completedTasks as $completedTask) {
+                    event(new WorkflowTaskCompleted($completedTask, $actor));
+                    $this->taskNotifier->completed($completedTask, $actor);
+                }
+                if ($openedTask) {
+                    event(new WorkflowTaskOpened($openedTask, $actor));
+                    $this->taskNotifier->opened($openedTask, $actor);
+                }
                 if ($result->status === WorkflowInstanceStatus::Completed) {
                     event(new WorkflowCompleted($result));
                 }
@@ -253,6 +276,17 @@ class WorkflowManager
             ->get()
             ->filter(fn (WorkflowTransition $transition): bool => $this->authorizer->authorize($actor, $instance, $transition))
             ->values();
+    }
+
+    /** @return Builder<WorkflowTask> */
+    public function inbox(Model $actor): Builder
+    {
+        return $this->workflowInbox->query($actor);
+    }
+
+    public function pendingCount(Model $actor): int
+    {
+        return $this->workflowInbox->count($actor);
     }
 
     /** @param array<string, mixed> $data */
@@ -335,7 +369,10 @@ class WorkflowManager
 
             $result = $this->reloadInstance($current);
             $assignedTask = $task->refresh()->load('assignee');
-            DB::afterCommit(fn () => event(new WorkflowTaskAssigned($assignedTask, $previousAssignee, $actor)));
+            DB::afterCommit(function () use ($assignedTask, $previousAssignee, $actor): void {
+                event(new WorkflowTaskAssigned($assignedTask, $previousAssignee, $actor));
+                $this->taskNotifier->assigned($assignedTask, $previousAssignee, $actor);
+            });
 
             return $result;
         });
@@ -377,14 +414,19 @@ class WorkflowManager
                 throw new WorkflowException('Only running workflow instances may be cancelled.');
             }
 
-            $current->tasks()
+            $cancelledTasks = $current->tasks()
                 ->where('status', WorkflowTaskStatus::Open->value)
+                ->get();
+            $current->tasks()
+                ->whereKey($cancelledTasks->modelKeys())
                 ->update(['status' => WorkflowTaskStatus::Cancelled->value, 'completed_at' => now()]);
+            $cancelledTasks->each->refresh();
             $current->update([
                 'status' => WorkflowInstanceStatus::Cancelled,
                 'cancelled_at' => now(),
                 'lock_version' => $current->lock_version + 1,
             ]);
+            $cancelledTasks->load($this->taskRelations());
 
             $log = $this->record(
                 $current,
@@ -397,13 +439,19 @@ class WorkflowManager
                 $requestHash,
             );
             $result = $this->reloadInstance($current);
-            DB::afterCommit(fn () => event(new WorkflowCancelled($result, $log)));
+            DB::afterCommit(function () use ($result, $log, $cancelledTasks, $actor): void {
+                event(new WorkflowCancelled($result, $log));
+                foreach ($cancelledTasks as $cancelledTask) {
+                    event(new WorkflowTaskCancelled($cancelledTask, $actor));
+                    $this->taskNotifier->cancelled($cancelledTask, $actor);
+                }
+            });
 
             return $result;
         });
     }
 
-    private function createTask(WorkflowInstance $instance, WorkflowState $state, ?Model $actor): void
+    private function createTask(WorkflowInstance $instance, WorkflowState $state, ?Model $actor): WorkflowTask
     {
         $assignmentStrategy = $this->assignments;
         if ($state->assignment_strategy !== null) {
@@ -424,6 +472,8 @@ class WorkflowManager
             $task->assignee()->associate($assignee);
         }
         $task->save();
+
+        return $task->load($this->taskRelations());
     }
 
     /** @param array<string, mixed> $data */
@@ -490,6 +540,12 @@ class WorkflowManager
     private function defaultRelations(): array
     {
         return ['definition', 'version', 'currentState', 'subject', 'tasks.assignee'];
+    }
+
+    /** @return list<string> */
+    private function taskRelations(): array
+    {
+        return ['assignee', 'state', 'instance.definition', 'instance.currentState', 'instance.subject'];
     }
 
     private function reloadInstance(WorkflowInstance $instance): WorkflowInstance

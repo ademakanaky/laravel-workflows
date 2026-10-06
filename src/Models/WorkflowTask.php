@@ -3,7 +3,10 @@
 namespace Ademakanaky\LaravelWorkflows\Models;
 
 use Ademakanaky\LaravelWorkflows\Enums\WorkflowTaskStatus;
+use Ademakanaky\LaravelWorkflows\Exceptions\WorkflowException;
 use Ademakanaky\LaravelWorkflows\Support\WorkflowModelRegistry;
+use Carbon\CarbonInterface;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
@@ -30,6 +33,42 @@ class WorkflowTask extends Model
         'due_at' => 'immutable_datetime',
         'completed_at' => 'immutable_datetime',
     ];
+
+    /**
+     * @param  Builder<WorkflowTask>  $query
+     * @return Builder<WorkflowTask>
+     */
+    public function scopeOpen(Builder $query): Builder
+    {
+        return $query->where('status', WorkflowTaskStatus::Open->value);
+    }
+
+    /**
+     * @param  Builder<WorkflowTask>  $query
+     * @return Builder<WorkflowTask>
+     */
+    public function scopeAssignedTo(Builder $query, Model $actor): Builder
+    {
+        if (! $actor->exists || $actor->getKey() === null) {
+            throw new WorkflowException('The workflow inbox actor must be a persisted Eloquent model.');
+        }
+
+        return $query
+            ->where('assignee_type', $actor->getMorphClass())
+            ->where('assignee_id', $actor->getKey());
+    }
+
+    /**
+     * @param  Builder<WorkflowTask>  $query
+     * @return Builder<WorkflowTask>
+     */
+    public function scopeOverdue(Builder $query, ?CarbonInterface $at = null): Builder
+    {
+        return $query
+            ->open()
+            ->whereNotNull('due_at')
+            ->where('due_at', '<', $at ?? now());
+    }
 
     /** @return BelongsTo<WorkflowInstance, $this> */
     public function instance(): BelongsTo

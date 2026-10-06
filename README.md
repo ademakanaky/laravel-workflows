@@ -248,6 +248,101 @@ $instance = Workflow::assign(
 );
 ```
 
+## Task inbox and notifications
+
+Add `ParticipatesInWorkflows` to the model that may receive workflow tasks:
+
+```php
+use Ademakanaky\LaravelWorkflows\Concerns\ParticipatesInWorkflows;
+
+class User extends Authenticatable
+{
+    use ParticipatesInWorkflows;
+}
+```
+
+An authenticated user's pending-work page can use the facade-backed inbox. It returns only open tasks assigned to that actor and eager loads the workflow state, definition, and subject:
+
+```php
+use Ademakanaky\LaravelWorkflows\Facades\Workflow;
+
+$tasks = Workflow::inbox($request->user())->paginate(20);
+$pendingCount = Workflow::pendingCount($request->user());
+```
+
+The count is suitable for navigation and menu badges. The same API is injectable when a facade is not desired:
+
+```php
+use Ademakanaky\LaravelWorkflows\WorkflowInbox;
+
+$tasks = app(WorkflowInbox::class)->paginate($request->user(), perPage: 20);
+$pendingCount = app(WorkflowInbox::class)->count($request->user());
+```
+
+The actor trait also exposes `pendingWorkflowTasks()`. Task queries may be composed directly:
+
+```php
+use Ademakanaky\LaravelWorkflows\Models\WorkflowTask;
+
+$tasks = WorkflowTask::query()
+    ->open()
+    ->assignedTo($request->user())
+    ->get();
+
+$overdue = WorkflowTask::query()
+    ->assignedTo($request->user())
+    ->overdue()
+    ->get();
+```
+
+Render the permitted actions for each inbox item and submit the selected transition through the normal runtime API:
+
+```php
+$available = $task->instance->availableTransitions($request->user());
+
+$instance = $task->instance->transition(
+    action: 'approve',
+    actor: $request->user(),
+    data: ['comment' => $request->string('comment')->toString()],
+);
+```
+
+For proactive alerts, implement `WorkflowTaskNotifier`. Its methods run after the enclosing database transaction commits, so notifications are never sent for rolled-back work. The default implementation does nothing.
+
+```php
+use Ademakanaky\LaravelWorkflows\Contracts\WorkflowTaskNotifier;
+use Ademakanaky\LaravelWorkflows\Models\WorkflowTask;
+use App\Notifications\WorkflowApprovalRequested;
+use Illuminate\Database\Eloquent\Model;
+
+class ApplicationWorkflowNotifier implements WorkflowTaskNotifier
+{
+    public function opened(WorkflowTask $task, ?Model $actor): void
+    {
+        $task->assignee?->notify(new WorkflowApprovalRequested($task));
+    }
+
+    public function assigned(WorkflowTask $task, ?Model $previousAssignee, ?Model $actor): void
+    {
+        $task->assignee?->notify(new WorkflowApprovalRequested($task));
+    }
+
+    public function completed(WorkflowTask $task, ?Model $actor): void {}
+
+    public function cancelled(WorkflowTask $task, ?Model $actor): void {}
+}
+```
+
+Register it in `config/workflows.php`:
+
+```php
+'task_notifier' => App\Workflows\ApplicationWorkflowNotifier::class,
+```
+
+The notifier can send Laravel database, mail, broadcast, Slack, or other notifications. Queue the application's notification when delivery should happen asynchronously. Applications may instead listen directly for `WorkflowTaskOpened`, `WorkflowTaskAssigned`, `WorkflowTaskCompleted`, and `WorkflowTaskCancelled`.
+
+Only assigned tasks appear in a personal inbox. Configure an `AssignmentStrategy` or explicitly call `Workflow::assign()` when a state requires an individual actor to take action.
+
 ## History and events
 
 Every start and transition creates an immutable `WorkflowTransitionLog` containing the states, action, actor, data, and idempotency key.
@@ -266,7 +361,10 @@ The package dispatches:
 - `WorkflowTransitioning` inside the transaction, before state mutation
 - `WorkflowTransitioned` after commit
 - `WorkflowCompleted` after commit when a final state is entered
+- `WorkflowTaskOpened` after a new task commits
 - `WorkflowTaskAssigned` after an assignment commits
+- `WorkflowTaskCompleted` after its transition commits
+- `WorkflowTaskCancelled` after cancellation commits
 - `WorkflowCancelled` after cancellation commits
 - `WorkflowDefinitionPublishing` before a definition version is persisted
 - `WorkflowDefinitionPublished` after a definition version commits

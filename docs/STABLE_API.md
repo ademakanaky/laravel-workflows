@@ -9,6 +9,7 @@ This document defines the compatibility surface intended for Laravel Workflows 1
 - `DefinitionValidator`
 - `WorkflowDefinitionExporter`
 - `WorkflowExtensionRegistry`
+- `WorkflowInbox`
 - The `Workflow` facade
 
 The method names, required arguments, return types, and documented behavior of these services follow Semantic Versioning after 1.0. New optional arguments and new methods may be added in minor releases.
@@ -38,6 +39,7 @@ New optional keys may be introduced in minor releases. Existing keys will not ch
 - `TransitionGuard`
 - `DefinitionPublisher`
 - `DefinitionValidator`
+- `WorkflowTaskNotifier`
 
 Contracts will not receive new required methods during 1.x.
 
@@ -45,11 +47,15 @@ Contracts will not receive new required methods during 1.x.
 
 Applications may extend the configured package models. Public relationships, casts, status enums, `HasWorkflows`, and `ParticipatesInWorkflows` are covered by the 1.x compatibility promise.
 
+`WorkflowTask` query scopes `open()`, `assignedTo()`, and `overdue()` are public. The facade methods `inbox()` and `pendingCount()` and the corresponding `WorkflowInbox` service provide the supported pending-work query boundary for application and administration interfaces.
+
 Published definition records and transition logs are immutable. Database-authored tools must publish through `DefinitionPublisher` rather than modifying these models.
 
 ## Events
 
 All event class names and constructor properties are public. Events documented as post-commit will continue to be emitted only after a successful outer transaction commits.
+
+Task lifecycle events include `WorkflowTaskOpened`, `WorkflowTaskAssigned`, `WorkflowTaskCompleted`, and `WorkflowTaskCancelled`. The configured `WorkflowTaskNotifier` is invoked at the same post-commit boundary.
 
 ## Database compatibility
 

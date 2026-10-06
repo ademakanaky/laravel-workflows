@@ -2,6 +2,7 @@
 
 namespace Ademakanaky\LaravelWorkflows\Concerns;
 
+use Ademakanaky\LaravelWorkflows\Enums\WorkflowTaskStatus;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowInstance;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowTask;
 use Ademakanaky\LaravelWorkflows\Models\WorkflowTransitionLog;
@@ -22,6 +23,12 @@ trait ParticipatesInWorkflows
     public function assignedWorkflowTasks(): MorphMany
     {
         return $this->morphMany(WorkflowModelRegistry::task(), 'assignee');
+    }
+
+    /** @return MorphMany<WorkflowTask, $this> */
+    public function pendingWorkflowTasks(): MorphMany
+    {
+        return $this->assignedWorkflowTasks()->where('status', WorkflowTaskStatus::Open->value);
     }
 
     /** @return MorphMany<WorkflowTransitionLog, $this> */
