@@ -31,6 +31,7 @@ class WorkflowServiceProvider extends ServiceProvider
         $this->app->singleton(WorkflowExtensionRegistry::class, fn () => new WorkflowExtensionRegistry(
             config('workflows.guards', []),
             config('workflows.assignment_strategies', []),
+            config('workflows.action_handlers', []),
         ));
         $this->app->singleton(WorkflowManager::class);
         $this->app->singleton(WorkflowInbox::class);
@@ -43,6 +44,7 @@ class WorkflowServiceProvider extends ServiceProvider
     {
         $migration = __DIR__.'/../database/migrations/2026_01_01_000000_create_workflow_tables.php';
         $administrationMigration = __DIR__.'/../database/migrations/2026_01_02_000000_add_workflow_administration_support.php';
+        $handlersMigration = __DIR__.'/../database/migrations/2026_01_03_000000_add_workflow_action_handlers.php';
 
         if (config('workflows.load_migrations', true)) {
             $this->loadMigrationsFrom(dirname($migration));
@@ -53,10 +55,14 @@ class WorkflowServiceProvider extends ServiceProvider
         $this->publishes([
             $migration => database_path('migrations/'.date('Y_m_d_His').'_create_workflow_tables.php'),
             $administrationMigration => database_path('migrations/'.date('Y_m_d_His', time() + 1).'_add_workflow_administration_support.php'),
+            $handlersMigration => database_path('migrations/'.date('Y_m_d_His', time() + 2).'_add_workflow_action_handlers.php'),
         ], 'workflows-migrations');
         $this->publishes([
             $administrationMigration => database_path('migrations/'.date('Y_m_d_His', time() + 1).'_add_workflow_administration_support.php'),
         ], 'workflows-administration-migration');
+        $this->publishes([
+            $handlersMigration => database_path('migrations/'.date('Y_m_d_His', time() + 2).'_add_workflow_action_handlers.php'),
+        ], 'workflows-v1-2-migration');
 
         if ($this->app->runningInConsole()) {
             $this->commands([SyncWorkflowsCommand::class, ValidateWorkflowsCommand::class]);

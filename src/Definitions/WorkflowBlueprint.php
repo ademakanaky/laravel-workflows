@@ -9,7 +9,7 @@ use Illuminate\Support\Str;
 /**
  * @phpstan-type CandidateDefinition array{type: string, id: string}
  * @phpstan-type StateDefinition array{key: string, name: string, initial: bool, final: bool, description: string|null, metadata: array<string, mixed>, assignment_strategy: string|null, candidates: list<CandidateDefinition>}
- * @phpstan-type TransitionDefinition array{action: string, from: string, to: string, name: string, guards: list<string>, metadata: array<string, mixed>}
+ * @phpstan-type TransitionDefinition array{action: string, from: string, to: string, name: string, guards: list<string>, handlers: list<string>, after_commit_handlers: list<string>, metadata: array<string, mixed>}
  */
 final class WorkflowBlueprint
 {
@@ -154,6 +154,14 @@ final class WorkflowBlueprint
                 $errors[] = "Transition at index [{$index}] guards must be an array.";
                 $transitionIsInvalid = true;
             }
+            if (isset($transition['handlers']) && ! is_array($transition['handlers'])) {
+                $errors[] = "Transition at index [{$index}] handlers must be an array.";
+                $transitionIsInvalid = true;
+            }
+            if (isset($transition['after_commit_handlers']) && ! is_array($transition['after_commit_handlers'])) {
+                $errors[] = "Transition at index [{$index}] after-commit handlers must be an array.";
+                $transitionIsInvalid = true;
+            }
             if (isset($transition['metadata']) && ! is_array($transition['metadata'])) {
                 $errors[] = "Transition at index [{$index}] metadata must be an array.";
                 $transitionIsInvalid = true;
@@ -169,6 +177,8 @@ final class WorkflowBlueprint
                 name: $transition['name'] ?? null,
                 guards: $transition['guards'] ?? [],
                 metadata: $transition['metadata'] ?? [],
+                handlers: $transition['handlers'] ?? [],
+                afterCommitHandlers: $transition['after_commit_handlers'] ?? [],
             );
         }
 
@@ -268,9 +278,21 @@ final class WorkflowBlueprint
         return $this;
     }
 
+    public function outcome(string $state, string $outcome): self
+    {
+        if (! isset($this->states[$state])) {
+            throw new DefinitionValidationException(["Cannot configure an outcome for unknown state [{$state}]."]);
+        }
+        $this->states[$state]['metadata']['outcome'] = $outcome;
+
+        return $this;
+    }
+
     /**
      * @param  array<array-key, mixed>  $guards
      * @param  array<string, mixed>  $metadata
+     * @param  array<array-key, mixed>  $handlers
+     * @param  array<array-key, mixed>  $afterCommitHandlers
      */
     public function transition(
         string $action,
@@ -279,23 +301,17 @@ final class WorkflowBlueprint
         ?string $name = null,
         array $guards = [],
         array $metadata = [],
+        array $handlers = [],
+        array $afterCommitHandlers = [],
     ): self {
-        $normalizedGuards = [];
-        foreach ($guards as $guard) {
-            if (! is_string($guard) || trim($guard) === '') {
-                throw new DefinitionValidationException([
-                    "Transition [{$action}] guards must be non-empty strings.",
-                ]);
-            }
-            $normalizedGuards[] = $guard;
-        }
-
         $this->transitions[] = [
             'action' => $action,
             'from' => $from,
             'to' => $to,
             'name' => $name ?? Str::headline($action),
-            'guards' => $normalizedGuards,
+            'guards' => $this->normalizeReferences($guards, "Transition [{$action}] guards"),
+            'handlers' => $this->normalizeReferences($handlers, "Transition [{$action}] handlers"),
+            'after_commit_handlers' => $this->normalizeReferences($afterCommitHandlers, "Transition [{$action}] after-commit handlers"),
             'metadata' => $metadata,
         ];
 
@@ -338,6 +354,10 @@ final class WorkflowBlueprint
             }
             if (trim($state['name']) === '') {
                 $errors[] = "State [{$stateKey}] must have a name.";
+            }
+            $outcome = $state['metadata']['outcome'] ?? null;
+            if ($outcome !== null && (! $state['final'] || ! is_string($outcome) || trim($outcome) === '')) {
+                $errors[] = "State [{$stateKey}] outcomes must be non-empty strings configured only on final states.";
             }
         }
 
@@ -509,5 +529,22 @@ final class WorkflowBlueprint
         }
 
         return array_values($normalized);
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $references
+     * @return list<string>
+     */
+    private function normalizeReferences(array $references, string $label): array
+    {
+        $normalized = [];
+        foreach ($references as $reference) {
+            if (! is_string($reference) || trim($reference) === '') {
+                throw new DefinitionValidationException(["{$label} must be non-empty strings."]);
+            }
+            $normalized[] = trim($reference);
+        }
+
+        return array_values(array_unique($normalized));
     }
 }

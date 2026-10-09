@@ -6,6 +6,17 @@ All notable changes to this project will be documented here. The project follows
 
 ### Added
 
+- Optional Spatie Permission adapters for role-based participants and transition permissions.
+- A built-in maker/checker guard preventing workflow initiators from performing protected transitions.
+- Registered transactional and after-commit action handlers per transition.
+- Named final-state outcomes and the post-commit `WorkflowOutcomeReached` event.
+- Mutable, serializable workflow drafts with validation and publication through `WorkflowAdministration`.
+- A dedicated additive 1.2 migration publish tag.
+
+## [1.1.0] - 2026-10-06
+
+### Added
+
 - A workflow inbox service and facade helpers for paginated pending tasks and badge counts.
 - `open`, `assignedTo`, and `overdue` workflow-task query scopes.
 - Post-commit task opened, completed, and cancelled lifecycle events.

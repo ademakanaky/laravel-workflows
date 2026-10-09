@@ -25,6 +25,9 @@ class WorkflowDefinitionValidator implements DefinitionValidator
             foreach ($transition['guards'] as $guard) {
                 $this->extensions->resolveGuard($guard);
             }
+            foreach (array_merge($transition['handlers'], $transition['after_commit_handlers']) as $handler) {
+                $this->extensions->resolveActionHandler($handler);
+            }
         }
 
         return $blueprint;

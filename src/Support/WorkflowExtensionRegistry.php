@@ -4,6 +4,7 @@ namespace Ademakanaky\LaravelWorkflows\Support;
 
 use Ademakanaky\LaravelWorkflows\Contracts\AssignmentStrategy;
 use Ademakanaky\LaravelWorkflows\Contracts\TransitionGuard;
+use Ademakanaky\LaravelWorkflows\Contracts\WorkflowActionHandler;
 use Ademakanaky\LaravelWorkflows\Exceptions\WorkflowException;
 
 class WorkflowExtensionRegistry
@@ -14,17 +15,24 @@ class WorkflowExtensionRegistry
     /** @var array<string, class-string<AssignmentStrategy>> */
     private array $assignmentStrategies = [];
 
+    /** @var array<string, class-string<WorkflowActionHandler>> */
+    private array $actionHandlers = [];
+
     /**
      * @param  array<string, class-string<TransitionGuard>>  $guards
      * @param  array<string, class-string<AssignmentStrategy>>  $assignmentStrategies
+     * @param  array<string, class-string<WorkflowActionHandler>>  $actionHandlers
      */
-    public function __construct(array $guards = [], array $assignmentStrategies = [])
+    public function __construct(array $guards = [], array $assignmentStrategies = [], array $actionHandlers = [])
     {
         foreach ($guards as $alias => $class) {
             $this->registerGuard($alias, $class);
         }
         foreach ($assignmentStrategies as $alias => $class) {
             $this->registerAssignmentStrategy($alias, $class);
+        }
+        foreach ($actionHandlers as $alias => $class) {
+            $this->registerActionHandler($alias, $class);
         }
     }
 
@@ -84,5 +92,34 @@ class WorkflowExtensionRegistry
         }
 
         return $class;
+    }
+
+    /** @param class-string<WorkflowActionHandler> $class */
+    public function registerActionHandler(string $alias, string $class): self
+    {
+        if (! is_subclass_of($class, WorkflowActionHandler::class)) {
+            throw new WorkflowException("Action handler [{$class}] must implement ".WorkflowActionHandler::class.'.');
+        }
+
+        $this->actionHandlers[$alias] = $class;
+
+        return $this;
+    }
+
+    /** @return class-string<WorkflowActionHandler> */
+    public function resolveActionHandler(string $aliasOrClass): string
+    {
+        $class = $this->actionHandlers[$aliasOrClass] ?? $aliasOrClass;
+        if (! is_subclass_of($class, WorkflowActionHandler::class)) {
+            throw new WorkflowException("Action handler [{$aliasOrClass}] is not registered or does not implement ".WorkflowActionHandler::class.'.');
+        }
+
+        return $class;
+    }
+
+    /** @return array<string, class-string<WorkflowActionHandler>> */
+    public function actionHandlers(): array
+    {
+        return $this->actionHandlers;
     }
 }

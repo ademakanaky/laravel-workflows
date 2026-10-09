@@ -34,6 +34,8 @@ class WorkflowDefinitionExporter
             'from' => $transition->fromState->key,
             'to' => $transition->toState->key,
             'guards' => $transition->guards ?? [],
+            'handlers' => $transition->handlers ?? [],
+            'after_commit_handlers' => $transition->after_commit_handlers ?? [],
             'metadata' => $transition->metadata ?? [],
         ])->all();
 

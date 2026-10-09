@@ -84,6 +84,8 @@ class DefinitionSynchronizer implements DefinitionPublisher
                     'action' => $transition['action'],
                     'name' => $transition['name'],
                     'guards' => $transition['guards'],
+                    'handlers' => $transition['handlers'],
+                    'after_commit_handlers' => $transition['after_commit_handlers'],
                     'metadata' => $transition['metadata'],
                 ]);
             }

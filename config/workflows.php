@@ -37,5 +37,10 @@ return [
     'participant_resolver' => DirectWorkflowParticipantResolver::class,
     'guards' => [],
     'assignment_strategies' => [],
+    'action_handlers' => [],
+    'spatie' => [
+        'permission_metadata_key' => 'permission',
+        'permission_mode' => 'all',
+    ],
     'allow_multiple_active_instances' => false,
 ];

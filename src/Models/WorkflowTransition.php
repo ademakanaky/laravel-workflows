@@ -16,6 +16,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string $name
  * @property list<string>|null $guards
  * @property array<string, mixed>|null $metadata
+ * @property list<string>|null $handlers
+ * @property list<string>|null $after_commit_handlers
  * @property-read WorkflowState $fromState
  * @property-read WorkflowState $toState
  */
@@ -27,7 +29,12 @@ class WorkflowTransition extends Model
 
     protected $guarded = [];
 
-    protected $casts = ['guards' => 'array', 'metadata' => 'array'];
+    protected $casts = [
+        'guards' => 'array',
+        'handlers' => 'array',
+        'after_commit_handlers' => 'array',
+        'metadata' => 'array',
+    ];
 
     /** @return BelongsTo<WorkflowVersion, $this> */
     public function version(): BelongsTo

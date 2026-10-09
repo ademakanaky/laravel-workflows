@@ -25,6 +25,9 @@
         "orchestra/testbench": "^7.0|^8.0|^9.0|^10.0|^11.0",
         "phpunit/phpunit": "^9.6|^10.5|^11.5|^12.0"
     },
+    "suggest": {
+        "spatie/laravel-permission": "Enables the optional Spatie role and permission workflow adapters."
+    },
     "autoload": {
         "psr-4": {
             "Ademakanaky\\LaravelWorkflows\\": "src/"

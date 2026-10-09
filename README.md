@@ -36,6 +36,13 @@ php artisan vendor:publish --tag=workflows-administration-migration
 php artisan migrate
 ```
 
+Applications upgrading from 1.1 with package migrations disabled must also publish the additive 1.2 migration:
+
+```bash
+php artisan vendor:publish --tag=workflows-v1-2-migration
+php artisan migrate
+```
+
 ## Define a workflow
 
 Add definitions to `config/workflows.php`:
@@ -190,6 +197,19 @@ Reference the alias on a transition:
 ]
 ```
 
+For the common maker/checker rule, register the package's built-in guard and place it only on transitions that must not be performed by the workflow initiator:
+
+```php
+use Ademakanaky\LaravelWorkflows\Guards\ActorIsNotWorkflowInitiator;
+
+'guards' => [
+    'maker-checker' => ActorIsNotWorkflowInitiator::class,
+],
+
+// Transition definition:
+'guards' => ['maker-checker'],
+```
+
 Guards are resolved through Laravel's container and must implement `TransitionGuard`. Class names remain supported for code-managed definitions, while aliases give an administration interface a finite allow-list it can safely display.
 
 ## Assignment and authorization
@@ -241,6 +261,37 @@ The default `TaskTransitionAuthorizer` allows unassigned tasks and restricts ass
 
 Applications remain responsible for authorizing access to their HTTP controllers and for preventing untrusted callers from invoking workflow management operations.
 
+### Optional Spatie Permission integration
+
+When the consuming application uses `spatie/laravel-permission`, the package includes adapters that preserve task-assignment rules while adding role candidates and permission checks. The Spatie package remains optional.
+
+```php
+use Ademakanaky\LaravelWorkflows\Integrations\Spatie\SpatieParticipantResolver;
+use Ademakanaky\LaravelWorkflows\Integrations\Spatie\SpatieTransitionAuthorizer;
+
+'participant_resolver' => SpatieParticipantResolver::class,
+'transition_authorizer' => SpatieTransitionAuthorizer::class,
+'spatie' => [
+    'permission_metadata_key' => 'permission',
+    'permission_mode' => 'all', // or "any" for a list of permissions
+],
+```
+
+Use a Spatie `Role` model as a state candidate, or attach a permission requirement to transition metadata:
+
+```php
+$blueprint
+    ->candidate('manager-review', $managerRole)
+    ->transition(
+        'approve',
+        'manager-review',
+        'approved',
+        metadata: ['permission' => 'purchase-requests.approve'],
+    );
+```
+
+The actor must still be eligible for the current task. Permission metadata may be a string or a list of strings.
+
 Actor models may use the `ParticipatesInWorkflows` trait to obtain `startedWorkflowInstances()`, `assignedWorkflowTasks()`, and `workflowActions()` relationships.
 
 Trusted application services may manually assign or unassign the current task. The operation is idempotent and recorded in workflow history:
@@ -253,6 +304,52 @@ $instance = Workflow::assign(
     data: ['reason' => 'Delegated during leave'],
     idempotencyKey: 'assignment-456',
 );
+```
+
+## Apply approved or rejected requests
+
+Transition action handlers let each workflow or request type apply its own business behavior without putting domain logic in controllers or in this package. Implement `WorkflowActionHandler` and register a safe alias:
+
+```php
+use Ademakanaky\LaravelWorkflows\Contracts\WorkflowActionHandler;
+
+class ApplyPurchaseDecision implements WorkflowActionHandler
+{
+    public function handle($actor, $instance, $transition, array $data): void
+    {
+        $request = $instance->subject;
+        $request->update(['status' => $transition->toState->metadata['outcome']]);
+    }
+}
+
+// config/workflows.php
+'action_handlers' => [
+    'apply-purchase-decision' => App\Workflows\ApplyPurchaseDecision::class,
+],
+```
+
+Attach handlers to the appropriate transitions. Transactional handlers execute before the state is changed and roll back the complete transition when they fail. After-commit handlers execute only after the outer database transaction commits and are suitable for integrations and side effects.
+
+```php
+$blueprint->transition(
+    'approve',
+    'finance-review',
+    'approved',
+    handlers: ['apply-purchase-decision'],
+    afterCommitHandlers: ['send-purchase-to-erp'],
+);
+```
+
+Handlers and their aliases are validated when a definition is published, included in definition export, and protected by transition idempotency.
+
+Final states can carry an application-defined outcome. Entering one dispatches `WorkflowOutcomeReached` after commit, allowing a single listener to route approved, rejected, cancelled, or custom outcomes across request types:
+
+```php
+$blueprint
+    ->state('approved', final: true)
+    ->state('rejected', final: true)
+    ->outcome('approved', 'approved')
+    ->outcome('rejected', 'rejected');
 ```
 
 ## Task inbox and notifications
@@ -361,7 +458,7 @@ Assigned tasks and unassigned tasks for which the actor is a candidate appear in
 
 ## Administration API
 
-`WorkflowAdministration` is the supported boundary for an administration interface. Controllers should use this service or the `WorkflowAdmin` facade instead of updating package tables directly. The host application remains responsible for authorizing administrative routes and actions.
+`WorkflowAdministration` is the supported headless boundary for an administration interface. The package deliberately does not prescribe routes, controllers, frontend technology, or authorization policy. A consuming application can build a Blade, Livewire, Inertia, API, Filament, Nova, or custom interface over the same service without a second package. Controllers should use this service or the `WorkflowAdmin` facade instead of updating package tables directly. The host application remains responsible for authorizing administrative routes and actions.
 
 ```php
 use Ademakanaky\LaravelWorkflows\WorkflowAdministration;
@@ -372,6 +469,34 @@ $definitions = $admin->definitions()->paginate();
 $versions = $admin->versions('purchase-approval')->paginate();
 $definition = $admin->definition('purchase-approval');
 ```
+
+### Create and edit drafts
+
+`WorkflowDraft` is a mutable, serializable authoring object for forms and API payloads. Draft persistence remains application-owned, while validation and publication stay inside the package:
+
+```php
+use Ademakanaky\LaravelWorkflows\Definitions\WorkflowDraft;
+
+$draft = WorkflowDraft::make('purchase-approval')
+    ->name('Purchase approval')
+    ->putState('pending', ['initial' => true])
+    ->putState('approved', ['final' => true])
+    ->outcome('approved', 'approved')
+    ->putTransition('approve', 'pending', 'approved')
+    ->guards('pending', 'approve', ['maker-checker'])
+    ->handlers('pending', 'approve', ['apply-purchase-decision']);
+
+DraftWorkflow::updateOrCreate(
+    ['slug' => $draft->slug],
+    ['definition' => $draft->toArray()],
+);
+
+$draft = WorkflowDraft::fromArray($storedDraft->definition);
+$admin->validateDraft($draft); // no database writes
+$version = $admin->publishDraft($draft); // immutable database-managed version
+```
+
+`$admin->draft($slug)` starts from the active or latest published version when one exists. State and transition removal, candidates, assignment strategies, guards, handlers, outcomes, and metadata are all editable through the draft API. The application decides who may save a draft, review it, and publish it.
 
 ### Configure step participants
 
@@ -490,6 +615,7 @@ The package dispatches:
 - `WorkflowTransitioning` inside the transaction, before state mutation
 - `WorkflowTransitioned` after commit
 - `WorkflowCompleted` after commit when a final state is entered
+- `WorkflowOutcomeReached` after commit when a final state declares an outcome
 - `WorkflowTaskOpened` after a new task commits
 - `WorkflowTaskAssigned` after an assignment commits
 - `WorkflowTaskCompleted` after its transition commits
@@ -505,9 +631,9 @@ The package dispatches:
 
 Listeners for the two pre-mutation events may throw an exception to abort and roll back the operation. Post-commit events are suitable for notifications, webhooks, and queued automation.
 
-## Administration-package integration
+## Headless administration integration
 
-The runtime package contains supported authoring seams so a separate administration package never needs to edit published records directly.
+The package contains the complete runtime and authoring seams required by a custom administration experience; a dedicated UI package is not required.
 
 Definitions have an ownership source:
 
@@ -530,7 +656,7 @@ Drafts can be checked without writing anything by resolving `DefinitionValidator
 
 `WorkflowDefinitionExporter` converts any published version back to the same canonical array schema used by `WorkflowBlueprint::fromArray()`. This supports visual editing, cloning, import/export, diffs, and draft publication without coupling the admin package to internal tables.
 
-`WorkflowExtensionRegistry` exposes the registered guards and assignment strategies that an interface may safely offer as dropdown choices. State-level assignment policies and transition guards are part of the canonical import/export schema. Mutable drafts and the visual interface belong to the separate admin package; only validated publication crosses into the runtime core.
+`WorkflowExtensionRegistry` exposes the registered guards, assignment strategies, and action handlers that an interface may safely offer as dropdown choices. State-level assignment policies, transition guards, and action handlers are part of the canonical import/export schema. `WorkflowDraft` provides the mutable editing layer, while only validated publication crosses into immutable runtime records.
 
 ## Custom models
 
@@ -541,7 +667,7 @@ Every package model is replaceable in `config/workflows.php`. Custom models shou
 - Definitions are validated before persistence.
 - Exactly one initial state and at least one final state are required.
 - Unknown, duplicate, unreachable, dead-end, non-terminating, and final-state outgoing transitions are rejected.
-- Referenced guards and assignment strategies must exist before publication.
+- Referenced guards, assignment strategies, and action handlers must exist before publication.
 - Running instances retain their original definition version.
 - Transitions use row locks and database transactions.
 - Transition history is append-only through the public API.
@@ -565,7 +691,7 @@ The supported public API and release guarantees are documented in [docs/STABLE_A
 
 ## Roadmap
 
-The first stable release focuses on deterministic sequential workflows. Planned extensions include parallel approval tasks, quorum approvals, deadlines, escalations, scheduled automation, and optional administration/API packages.
+The stable core focuses on deterministic sequential workflows. Planned extensions include parallel approval tasks, quorum approvals, deadlines, escalations, and scheduled automation.
 
 ## Contributing
 

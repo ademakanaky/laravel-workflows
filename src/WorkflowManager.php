@@ -12,6 +12,7 @@ use Ademakanaky\LaravelWorkflows\Enums\WorkflowInstanceStatus;
 use Ademakanaky\LaravelWorkflows\Enums\WorkflowTaskStatus;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowCancelled;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowCompleted;
+use Ademakanaky\LaravelWorkflows\Events\WorkflowOutcomeReached;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowStarted;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowStarting;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowTaskAssigned;
@@ -228,6 +229,11 @@ class WorkflowManager
 
             event(new WorkflowTransitioning($current, $transition, $actor, $data));
 
+            foreach ($transition->handlers ?? [] as $handlerAlias) {
+                $handlerClass = $this->extensions->resolveActionHandler($handlerAlias);
+                app($handlerClass)->handle($actor, $current, $transition, $data);
+            }
+
             $from = $current->current_state_id;
             $completedTasks = $current->tasks()
                 ->where('workflow_state_id', $from)
@@ -250,7 +256,7 @@ class WorkflowManager
             $openedTask = $transition->toState->is_final ? null : $this->createTask($current, $transition->toState, $actor);
 
             $result = $this->reloadInstance($current);
-            DB::afterCommit(function () use ($result, $log, $completedTasks, $openedTask, $actor): void {
+            DB::afterCommit(function () use ($result, $log, $completedTasks, $openedTask, $actor, $transition, $data): void {
                 event(new WorkflowTransitioned($result, $log));
                 foreach ($completedTasks as $completedTask) {
                     event(new WorkflowTaskCompleted($completedTask, $actor));
@@ -261,7 +267,15 @@ class WorkflowManager
                     $this->taskNotifier->opened($openedTask, $actor);
                 }
                 if ($result->status === WorkflowInstanceStatus::Completed) {
+                    $outcome = $result->currentState->metadata['outcome'] ?? null;
+                    if (is_string($outcome)) {
+                        event(new WorkflowOutcomeReached($result, $outcome));
+                    }
                     event(new WorkflowCompleted($result));
+                }
+                foreach ($transition->after_commit_handlers ?? [] as $handlerAlias) {
+                    $handlerClass = $this->extensions->resolveActionHandler($handlerAlias);
+                    app($handlerClass)->handle($actor, $result, $transition, $data);
                 }
             });
 

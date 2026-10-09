@@ -5,6 +5,7 @@ namespace Ademakanaky\LaravelWorkflows;
 use Ademakanaky\LaravelWorkflows\Data\WorkflowDashboardSummary;
 use Ademakanaky\LaravelWorkflows\Data\WorkflowProcessSnapshot;
 use Ademakanaky\LaravelWorkflows\Definitions\WorkflowBlueprint;
+use Ademakanaky\LaravelWorkflows\Definitions\WorkflowDraft;
 use Ademakanaky\LaravelWorkflows\Enums\WorkflowDefinitionSource;
 use Ademakanaky\LaravelWorkflows\Enums\WorkflowTaskStatus;
 use Ademakanaky\LaravelWorkflows\Events\WorkflowDefinitionActivated;
@@ -60,6 +61,32 @@ class WorkflowAdministration
     public function publish(WorkflowBlueprint $blueprint): WorkflowVersion
     {
         return $this->definitions->publish($blueprint, WorkflowDefinitionSource::Database);
+    }
+
+    public function draft(string $slug): WorkflowDraft
+    {
+        $class = WorkflowModelRegistry::definition();
+        $definition = $class::query()->where('slug', $slug)->first();
+        if (! $definition) {
+            return WorkflowDraft::make($slug);
+        }
+        $version = $definition->activeVersion ?? $definition->latestVersion;
+
+        return $version
+            ? WorkflowDraft::fromBlueprint($this->exporter->blueprint($version))
+            : WorkflowDraft::make($slug);
+    }
+
+    public function validateDraft(WorkflowDraft $draft): WorkflowDraft
+    {
+        $this->validator->validate($draft->blueprint());
+
+        return $draft;
+    }
+
+    public function publishDraft(WorkflowDraft $draft): WorkflowVersion
+    {
+        return $this->publish($this->validateDraft($draft)->blueprint());
     }
 
     /** @return array<string, mixed> */

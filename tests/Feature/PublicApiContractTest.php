@@ -30,6 +30,7 @@ use Ademakanaky\LaravelWorkflows\Tests\Fixtures\CustomWorkflowTransition;
 use Ademakanaky\LaravelWorkflows\Tests\Fixtures\CustomWorkflowTransitionLog;
 use Ademakanaky\LaravelWorkflows\Tests\Fixtures\CustomWorkflowVersion;
 use Ademakanaky\LaravelWorkflows\Tests\Fixtures\Document;
+use Ademakanaky\LaravelWorkflows\Tests\Fixtures\RecordingActionHandler;
 use Ademakanaky\LaravelWorkflows\Tests\Fixtures\User;
 use Ademakanaky\LaravelWorkflows\Tests\TestCase;
 use Ademakanaky\LaravelWorkflows\WorkflowDefinitionExporter;
@@ -198,12 +199,15 @@ class PublicApiContractTest extends TestCase
         $registry = new WorkflowExtensionRegistry(
             ['amount-limit' => AmountGuard::class],
             ['initiator' => ActorAssignmentStrategy::class],
+            ['record' => RecordingActionHandler::class],
         );
 
         $this->assertSame(['amount-limit' => AmountGuard::class], $registry->guards());
         $this->assertSame(['initiator' => ActorAssignmentStrategy::class], $registry->assignmentStrategies());
+        $this->assertSame(['record' => RecordingActionHandler::class], $registry->actionHandlers());
         $this->assertSame(AmountGuard::class, $registry->resolveGuard('amount-limit'));
         $this->assertSame(ActorAssignmentStrategy::class, $registry->resolveAssignmentStrategy('initiator'));
+        $this->assertSame(RecordingActionHandler::class, $registry->resolveActionHandler('record'));
     }
 
     public function test_exporter_blueprint_round_trips_the_canonical_definition(): void
@@ -220,17 +224,22 @@ class PublicApiContractTest extends TestCase
         $config = ServiceProvider::pathsToPublish(WorkflowServiceProvider::class, 'workflows-config');
         $migrations = ServiceProvider::pathsToPublish(WorkflowServiceProvider::class, 'workflows-migrations');
         $administrationMigrations = ServiceProvider::pathsToPublish(WorkflowServiceProvider::class, 'workflows-administration-migration');
+        $actionHandlerMigrations = ServiceProvider::pathsToPublish(WorkflowServiceProvider::class, 'workflows-v1-2-migration');
         $configSource = realpath(__DIR__.'/../../config/workflows.php');
         $migrationSource = realpath(__DIR__.'/../../database/migrations/2026_01_01_000000_create_workflow_tables.php');
         $administrationMigrationSource = realpath(__DIR__.'/../../database/migrations/2026_01_02_000000_add_workflow_administration_support.php');
+        $actionHandlerMigrationSource = realpath(__DIR__.'/../../database/migrations/2026_01_03_000000_add_workflow_action_handlers.php');
 
         $this->assertContains(config_path('workflows.php'), $config);
         $this->assertContains($configSource, array_map('realpath', array_keys($config)));
         $this->assertContains($migrationSource, array_map('realpath', array_keys($migrations)));
         $this->assertContains($administrationMigrationSource, array_map('realpath', array_keys($migrations)));
-        $this->assertCount(2, $migrations);
+        $this->assertContains($actionHandlerMigrationSource, array_map('realpath', array_keys($migrations)));
+        $this->assertCount(3, $migrations);
         $this->assertContains($administrationMigrationSource, array_map('realpath', array_keys($administrationMigrations)));
         $this->assertCount(1, $administrationMigrations);
+        $this->assertContains($actionHandlerMigrationSource, array_map('realpath', array_keys($actionHandlerMigrations)));
+        $this->assertCount(1, $actionHandlerMigrations);
     }
 
     public function test_commands_cover_selection_validation_and_empty_configuration(): void

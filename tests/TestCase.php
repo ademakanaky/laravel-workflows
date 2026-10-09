@@ -70,6 +70,12 @@ abstract class TestCase extends Orchestra
             $table->timestamps();
         });
 
+        Schema::create('roles', function (Blueprint $table): void {
+            $table->id();
+            $table->string('name');
+            $table->timestamps();
+        });
+
         Schema::create('uuid_documents', function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->string('title');
